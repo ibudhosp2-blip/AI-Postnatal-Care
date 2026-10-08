@@ -45,7 +45,10 @@
         <p class="sub">AI Thai Postnatal Care</p>
         <p class="desc">ระบบอัจฉริยะเชื่อมโยงการดูแลมารดาหลังคลอด แบบบูรณาการตามศาสตร์การแพทย์แผนไทย</p>
       </div>
-      <button class="gear" data-go="me" aria-label="ตั้งค่า"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.9 7.9 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.9a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.9 7.9 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.9a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button>
+      <div class="hacts">
+        <button class="hbtn" data-go="alerts" aria-label="แจ้งเตือน"><svg viewBox="0 0 24 24"><path d="M12 22a2.4 2.4 0 0 0 2.4-2.4h-4.8A2.4 2.4 0 0 0 12 22zm7-6V11a7 7 0 0 0-5-6.7V3a2 2 0 0 0-4 0v1.3A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg><b class="bdg" id="hbell" hidden></b></button>
+        <button class="hbtn" data-go="me" aria-label="บัญชีของฉัน"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"/></svg></button>
+      </div>
     </header>
 
     <div class="stage">
@@ -59,6 +62,7 @@
       </div>
     </div>
     <p class="pill">ต้นแบบเพื่อสาธิต · ไม่ใช่คำแนะนำทางการแพทย์</p>
+    <p class="dchip" id="dchip" hidden></p>
 
     <div class="card gcard">
       <div class="chead"><span class="cico"><svg viewBox="0 0 24 24" fill="#fff"><path d="M5 12h3v8H5zm5-6h3v14h-3zm5 3h3v11h-3z"/></svg></span><h2>กราฟแสดงระดับความเสี่ยงหลังคลอด</h2></div>
@@ -86,7 +90,7 @@
   <section class="view" id="v-birth">
     <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>ข้อมูลการคลอด</h2></div>
     <div class="card">
-      <dl class="kv"><dt>HN</dt><dd id="b-hn">-</dd><dt>ชื่อ</dt><dd id="b-name">-</dd><dt>วันคลอด</dt><dd id="b-date">-</dd><dt>หลังคลอด</dt><dd id="b-days">-</dd><dt>ลักษณะการคลอด</dt><dd id="b-mode">-</dd></dl>
+      <dl class="kv"><dt>HN</dt><dd id="b-hn">-</dd><dt>ชื่อ</dt><dd id="b-name">-</dd><dt>วันคลอด</dt><dd id="b-date">-</dd><dt>หลังคลอด</dt><dd id="b-days">-</dd><dt>ลักษณะการคลอด</dt><dd id="b-mode">-</dd><dt>อายุ</dt><dd id="b-age">-</dd><dt>อายุครรภ์</dt><dd id="b-ga">-</dd><dt>สิทธิ์การรักษา</dt><dd id="b-cov">-</dd></dl>
       <p class="muted">ข้อมูลนี้บันทึกโดยเจ้าหน้าที่ หากไม่ถูกต้องกรุณาแจ้งเจ้าหน้าที่</p>
     </div>
   </section>
@@ -95,6 +99,7 @@
   <section class="view" id="v-assess">
     <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>ประเมินอาการ</h2></div>
     <div id="levelbar" class="levelbar"></div>
+    <div class="card" id="dayrow"><label>ประเมินของวัน<select id="forDay"></select></label><div id="assessInfo" class="muted"></div></div>
     <form id="form" class="card" autocomplete="off">
       <div class="row">
         <label>วันหลังคลอด<input type="number" name="days" value="0" readonly></label>
@@ -105,16 +110,16 @@
         <label>น้ำนม<select name="milk"><option value="enough">เพียงพอ</option><option value="low">น้อย</option><option value="none">ยังไม่มี</option></select></label>
       </div>
       <div class="row">
-        <label>อุณหภูมิ °C<input type="number" name="tempC" step="0.1" value="36.8" inputmode="decimal"></label>
-        <label>ปวด 0–10<input type="number" name="pain" min="0" max="10" value="4" inputmode="numeric"></label>
+        <label>อุณหภูมิ °C<input type="number" name="tempC" step="0.1" inputmode="decimal" placeholder="36.8"></label>
+        <label>ปวด 0–10<input type="number" name="pain" min="0" max="10" value="0" inputmode="numeric"></label>
       </div>
       <div class="row">
-        <label>ความดันบน<input type="number" name="sys" value="118" inputmode="numeric"></label>
-        <label>ความดันล่าง<input type="number" name="dia" value="76" inputmode="numeric"></label>
+        <label>ความดันบน<input type="number" name="sys" inputmode="numeric" placeholder="118"></label>
+        <label>ความดันล่าง<input type="number" name="dia" inputmode="numeric" placeholder="76"></label>
       </div>
       <div class="row">
-        <label>EPDS 0–30<input type="number" name="epds" min="0" max="30" value="6" inputmode="numeric"></label>
-        <label>นอน ชม./วัน<input type="number" name="sleepHours" step="0.5" value="5" inputmode="decimal"></label>
+        <label>EPDS 0–30<input type="number" name="epds" min="0" max="30" inputmode="numeric" placeholder="0–30"></label>
+        <label>นอน ชม./วัน<input type="number" name="sleepHours" step="0.5" inputmode="decimal" placeholder="5"></label>
       </div>
       <fieldset><legend>มีอาการเหล่านี้ไหม</legend>
         <label class="ck"><input type="checkbox" name="chestOrBreath"> เจ็บหน้าอก/หายใจลำบาก</label>
@@ -205,6 +210,16 @@
     <button class="primary" id="logout" type="button">ออกจากระบบ</button>
     <div class="card" style="margin-top:14px"><p class="muted">AI แนะนำ — บุคลากรตัดสินใจ<br>ข้อมูลของคุณถูกเก็บอย่างปลอดภัยและเจ้าหน้าที่ที่เกี่ยวข้องเท่านั้นที่เข้าถึงได้</p></div>
   </section>
+
+  <div id="msgbox" hidden role="dialog" aria-modal="true" aria-labelledby="mb-title">
+    <div class="mbcard">
+      <div class="mbico">🔔</div>
+      <h2 id="mb-title"></h2><p id="mb-body"></p><p class="muted" id="mb-date"></p>
+      <button class="primary" id="mb-ack" type="button">รับทราบ</button>
+      <button class="primary alt" id="mb-map" type="button" style="margin-top:8px;width:100%">📍 หาคลินิกแพทย์แผนไทยใกล้ฉัน</button>
+      <button class="link" id="mb-close" type="button" style="margin-top:10px">ปิดไว้ก่อน</button>
+    </div>
+  </div>
 
   <nav id="bottom">
     <button data-go="home" data-nav="home"><svg viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3z"/></svg><span>หน้าแรก</span></button>

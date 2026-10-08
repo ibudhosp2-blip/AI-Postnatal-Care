@@ -167,3 +167,20 @@ input[type=file]{padding:8px;min-height:46px;background:#fffafb}
 .lcam h2{margin-bottom:2px}
 .primary.alt{background:#fff;color:var(--pink-d);border:1.5px solid var(--pink);box-shadow:none;width:auto;padding:0 18px}
 #login.scanning .logo,#login.scanning h1,#login.scanning .sub{display:none}#login.scanning .lbox{padding-top:6px}
+
+/* ---------- header actions, referral, message box ---------- */
+.hacts{position:absolute;right:0;top:max(2px,env(safe-area-inset-top));display:flex;gap:6px}
+.hbtn{position:relative;width:42px;height:42px;border-radius:50%;border:1.5px solid var(--gold-l);background:#fff;padding:0;display:grid;place-items:center;box-shadow:var(--shadow)}
+.hbtn svg{width:22px;height:22px;fill:var(--gold-d)}
+.bdg{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;border-radius:10px;background:var(--pink-d);color:#fff;font-size:.7rem;display:grid;place-items:center;border:2px solid #fff;padding:0 3px}
+.dchip{display:block;width:max-content;margin:-4px auto 10px;padding:3px 14px;border-radius:999px;background:linear-gradient(135deg,#ff7e95,var(--pink-d));color:#fff;font-size:.82rem;font-weight:500}
+.refbox{margin:10px 0;padding:12px;border-radius:14px;border:1.5px solid}
+.refbox.hospital{background:#fde7ea;border-color:#f3a3ae}.refbox.ttm{background:#fdf3d2;border-color:#ecd27a}.refbox.both{background:#fde9d6;border-color:#f3b98a}
+.refbox p{margin:0 0 8px}.refbtns{display:flex;gap:8px;flex-wrap:wrap}
+.mapbtn{background:#fff;border:1.5px solid var(--pink);color:var(--pink-d);border-radius:12px;padding:0 14px;min-height:44px;font:inherit;cursor:pointer}
+.mapbtn.h{background:var(--red);border-color:var(--red);color:#fff}
+#msgbox{position:fixed;inset:0;z-index:70;background:rgba(74,47,56,.55);display:grid;place-items:center;padding:20px}
+.mbcard{background:#fff;border:2px solid var(--gold-l);border-radius:24px;padding:22px 18px;max-width:380px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.mbico{font-size:2.2rem}.mbcard h2{color:var(--pink-d);margin:4px 0 8px}.mbcard p{margin:0 0 8px}.mbcard .primary{width:100%}
+.al .n.rehab{background:#e6f5ec;color:var(--green)}.al .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.al.unread{border-color:var(--pink)}

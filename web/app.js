@@ -32,16 +32,16 @@
 
   // ---------- Login: step 1 (HN or phone + part of name) → step 2 (live face scan, no upload) ----------
   const login = $('#login'), lform = $('#lform');
-  let scanner = null;
+  let scanner = null, mockMode = false;
   function showLogin(msg) { stopScan(); me = null; login.hidden = false; $('#bottom').hidden = true; $$('.view').forEach(v => v.classList.remove('on')); stepOne(msg); }
   function stopScan() { if (scanner) { scanner.cancel(); scanner = null; } }
   function stepOne(msg) { stopScan(); login.classList.remove('scanning'); lform.hidden = false; $('#lstep2').hidden = true; $('#lmsg').textContent = msg || ''; $('#lbtn').disabled = false; }
   async function stepTwo() {
     lform.hidden = true; login.classList.add('scanning'); $('#lstep2').hidden = false; $('#lmsg2').textContent = ''; $('#lretry').hidden = true;
-    stopScan(); scanner = PNCFace.liveScan($('#camwrap'), { liveness: true });
+    stopScan(); scanner = mockMode ? PNCFace.mockScan($('#camwrap')) : PNCFace.liveScan($('#camwrap'), { liveness: true });
     try {
       const r = await scanner.promise; scanner = null;
-      await api('POST', '/api/patient/login', { descriptor: r.descriptor });      // only the 128-number descriptor is sent
+      await api('POST', '/api/patient/login', mockMode ? {} : { descriptor: r.descriptor });      // only the 128-number descriptor is sent (never an image)
       lform.reset(); await startApp();
     } catch (er) {
       scanner = null;
@@ -52,12 +52,31 @@
   }
   lform.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg').textContent = ''; $('#lbtn').disabled = true;
-    try { await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); await stepTwo(); }
+    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); mockMode = !!r.mock; await stepTwo(); }
     catch (er) { $('#lmsg').textContent = er.message; } finally { $('#lbtn').disabled = false; }
   });
   $('#lretry').addEventListener('click', stepTwo);
   $('#lback').addEventListener('click', () => stepOne());
   $('#logout').addEventListener('click', async () => { await api('POST', '/api/patient/logout').catch(() => {}); location.hash = ''; showLogin(); });
+
+  // ---------- GPS: โรงพยาบาล / คลินิกแพทย์แผนไทย ใกล้ตัว (Google Maps, ไม่ต้องใช้ API key) ----------
+  function openNearby(kind) {
+    const q = kind === 'hospital' ? 'โรงพยาบาล' : 'คลินิกการแพทย์แผนไทย';
+    const w = window.open('about:blank', '_blank');                               // เปิดแท็บทันที (กัน popup blocker) แล้วค่อยใส่ตำแหน่ง
+    const go = (ll) => {
+      const url = ll ? `https://www.google.com/maps/search/${encodeURIComponent(q)}/@${ll.lat},${ll.lng},14z` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + 'ใกล้ฉัน')}`;
+      if (w) w.location.href = url; else location.href = url;
+    };
+    if (!navigator.geolocation) return go(null);
+    navigator.geolocation.getCurrentPosition(pos => go({ lat: pos.coords.latitude, lng: pos.coords.longitude }), () => go(null), { timeout: 8000, maximumAge: 300000 });
+  }
+  document.addEventListener('click', e => { const b = e.target.closest('[data-near]'); if (b) openNearby(b.dataset.near); });
+  function referralBox(r) {
+    if (r.referral === 'hospital') return `<div class="refbox hospital"><p>🚨 <b>ควรไปพบแพทย์ที่โรงพยาบาลทันที</b> (โทร 1669 หากฉุกเฉิน)</p><div class="refbtns"><button type="button" class="mapbtn h" data-near="hospital">📍 โรงพยาบาลใกล้ฉัน (GPS)</button></div></div>`;
+    if (r.referral === 'ttm') return `<div class="refbox ttm"><p>🌿 <b>แนะนำพบแพทย์แผนไทย</b> เช่น คัดตึง/ปวดตึงเต้านม น้ำนมไหลน้อย</p><div class="refbtns"><button type="button" class="mapbtn" data-near="ttm">📍 คลินิกแพทย์แผนไทยใกล้ฉัน (GPS)</button></div></div>`;
+    if (r.referral === 'both') return `<div class="refbox both"><p>🟠 <b>ให้บุคลากรประเมินโดยเร็ว (ภายในวันนี้)</b> — เลือกสถานที่ที่สะดวก</p><div class="refbtns"><button type="button" class="mapbtn h" data-near="hospital">📍 โรงพยาบาลใกล้ฉัน</button><button type="button" class="mapbtn" data-near="ttm">📍 คลินิกแพทย์แผนไทยใกล้ฉัน</button></div></div>`;
+    return '';
+  }
 
   // ---------- Assessment ----------
   const STATUS = { consider: 'พิจารณาได้ (รอยืนยัน)', defer: 'ยังไม่ถึงช่วงที่พิจารณา', avoid: 'ไม่แนะนำ/มีข้อห้าม' };
@@ -75,7 +94,8 @@
       <p>${badge(r)}</p>
       <ul class="reasons">${r.reasons.map(x => `<li>${esc(x.text)}</li>`).join('')}</ul>
       <p><b>แนวทาง:</b> ${esc(r.action)}</p>
-      ${r.level === 'red' ? '<div class="alert">🚨 โทร <b>1669</b> หรือไปโรงพยาบาลที่ใกล้ที่สุดทันที — ระบบหยุดให้คำแนะนำทั่วไป</div>' : ''}
+      ${referralBox(r)}
+      ${r.level === 'red' ? '<div class="alert">ระบบหยุดให้คำแนะนำทั่วไป — โปรดติดต่อโรงพยาบาลทันที</div>' : ''}
       ${a.selfHarm ? '<div class="alert">สายด่วนสุขภาพจิต <b>1323</b> (24 ชม.)</div>' : ''}
       ${missing}
       <h2 style="margin-top:16px">แนวทางแพทย์แผนไทย</h2>
@@ -90,10 +110,39 @@
     $('#levelbar').innerHTML = `${badge(r)}<small>${esc(r.reasons[0].text)}</small>`;
   };
   form.addEventListener('input', rerun); form.addEventListener('change', rerun);
+  // เลือกวันที่ประเมิน: D1..วันนี้ (ย้อนหลังได้ / เว้นวันได้ / ล่วงหน้าไม่ได้)
+  const forDay = $('#forDay');
+  const doneDays = () => new Set(history.map(h => h.day));
+  function buildDayOptions() {
+    const D = me.days, keep = forDay.value;
+    $('#saveAssess').disabled = D < 1;
+    if (D < 1) {
+      forDay.innerHTML = '<option value="">—</option>'; forDay.disabled = true;
+      $('#assessInfo').textContent = D === 0 ? 'วันนี้คือวันคลอด (D0) — เริ่มประเมินได้ตั้งแต่พรุ่งนี้ (D1)' : `ยังไม่ถึงวันคลอด (อีก ${-D} วัน) — เริ่มประเมินได้หลังคลอด (D1)`; return;
+    }
+    forDay.disabled = false; const done = doneDays(); let html = '';
+    for (let d = D; d >= Math.max(1, D - 44); d--) html += `<option value="${d}">${d === D ? 'วันนี้ ' : ''}D${d}${done.has(d) ? ' ✓ ประเมินแล้ว' : ''}</option>`;
+    forDay.innerHTML = html; forDay.value = keep && +keep <= D && +keep >= 1 ? keep : String(D);
+    const missed = []; for (let d = Math.max(1, D - 13); d < D; d++) if (!done.has(d)) missed.push('D' + d);
+    $('#assessInfo').textContent = 'ประเมินทุกวัน (D0 = วันคลอด) · ลืมกรอกย้อนหลังได้ หรือเว้นไว้ก็ได้' + (missed.length ? ` · ยังไม่ได้ประเมิน: ${missed.join(', ')}` : '');
+  }
+  function loadDay() {
+    const d = +forDay.value; if (!d) return rerun();
+    const prev = history.find(h => h.day === d), inp = prev && prev.input;
+    form.reset();
+    if (inp) for (const el of form.elements) { if (!el.name || el.name === 'days' || el.name === 'delivery') continue; const v = inp[el.name]; if (el.type === 'checkbox') el.checked = v === true; else if (v != null) el.value = v; }
+    form.elements.days.value = d; form.elements.delivery.value = me.deliveryMode;
+    $('#saveMsg').textContent = prev ? `โหลดผลที่บันทึกไว้ของ D${d} — บันทึกใหม่จะแทนที่ผลเดิม` : '';
+    rerun();
+  }
+  forDay.addEventListener('change', loadDay);
   $('#saveAssess').addEventListener('click', async () => {
-    const btn = $('#saveAssess'); btn.disabled = true;
-    try { const r = await api('POST', '/api/patient/assessment', { input: readForm() }); $('#saveMsg').textContent = '✓ บันทึกแล้ว เจ้าหน้าที่จะเห็นผลนี้' + (r.level === 'red' || r.level === 'orange' ? ' และจะติดตามโดยเร็ว' : ''); await loadHistory(); }
-    catch (e) { $('#saveMsg').textContent = e.message; } finally { btn.disabled = false; }
+    const btn = $('#saveAssess'); btn.disabled = true; const d = +forDay.value;
+    try {
+      const r = await api('POST', '/api/patient/assessment', { forDay: d, input: readForm() });
+      $('#saveMsg').textContent = `✓ บันทึกผลของ D${d} แล้ว${r.replaced ? ' (แทนที่ผลเดิม)' : ''} เจ้าหน้าที่จะเห็นผลนี้` + (r.level === 'red' || r.level === 'orange' ? ' และจะติดตามโดยเร็ว' : '');
+      await loadHistory(); buildDayOptions(); forDay.value = String(d); await loadNotifs();
+    } catch (e) { $('#saveMsg').textContent = e.message; } finally { btn.disabled = me.days < 1; }
   });
 
   // ---------- Chat: triage first (rule-based), then optional AI Q&A ----------
@@ -150,8 +199,11 @@
     if (ans.selfHarm) lines.push('', 'สายด่วนสุขภาพจิต 1323 (24 ชม.)');
     if (kb.aiEnabled && r.level !== 'red') lines.push('', 'มีคำถามอื่น พิมพ์ถามน้องหมอท้องได้เลยค่ะ');
     say(lines.join('\n'));
-    api('POST', '/api/patient/assessment', { input: ans }).then(loadHistory).catch(() => {});   // ส่งผลคัดกรองให้เจ้าหน้าที่เห็น
-    const b = document.createElement('button'); b.type = 'button'; b.textContent = 'เริ่มใหม่'; b.onclick = resetChat; quick.appendChild(b);
+    if (me && me.days >= 1) api('POST', '/api/patient/assessment', { input: ans, source: 'chat' }).then(() => Promise.all([loadHistory(), loadNotifs()])).catch(() => {});   // ส่งผลคัดกรองให้เจ้าหน้าที่เห็น
+    const mk = (t, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.onclick = fn; if (cls) b.className = cls; quick.appendChild(b); };
+    if (r.referral === 'hospital' || r.referral === 'both') mk('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h');
+    if (r.referral === 'ttm' || r.referral === 'both') mk('📍 คลินิกแพทย์แผนไทยใกล้ฉัน', () => openNearby('ttm'), 'mapbtn');
+    mk('เริ่มใหม่', resetChat);
   }
   $('#chatform').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -192,10 +244,27 @@
     [42, 'สุขภาพหลังคลอดกลับมาใกล้เคียงปกติหรือยัง?', ['ปกติแล้ว → ปิดเคส', 'ยังไม่ → นัดพบบุคลากร']],
   ];
   $('#timeline').innerHTML = `<div class="tl">${FU.map(([d, q, r]) => `<div class="d">Day ${d}</div><div class="bubble">${esc(q)}</div><div class="replies">${r.map(x => `<span>${esc(x)}</span>`).join('')}</div>`).join('')}</div>`;
+  // ---------- Notifications: กระดิ่ง + กล่องข้อความตอนเข้าแอป ----------
+  let notif = { items: [], unread: 0, popup: null };
+  const fmtShort = (d) => new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
   function renderAlerts() {
-    const today = me ? me.days : 0, nextIdx = FU.findIndex(f => f[0] > today);
-    $('#alertlist').innerHTML = FU.map(([d, q], i) => `<div class="card al ${i === nextIdx ? 'next' : d <= today ? 'done' : ''}"><div class="n"><span>วัน<b>${d}</b></span></div><div><div>${esc(q)}</div>${d <= today ? '<small>✓ ถึงกำหนดแล้ว</small>' : i === nextIdx ? '<small style="color:var(--pink-d)">ถัดไป</small>' : ''}</div></div>`).join('');
-    const left = FU.filter(f => f[0] > today).length; $('#dot').textContent = left || ''; $('#dot').hidden = !left;
+    const ICON = { rehab: '🌿', assess: '📝', info: 'ℹ️' };
+    $('#alertlist').innerHTML = notif.items.length ? notif.items.map(i => `<div class="card al ${i.unread ? 'unread' : ''}"><div class="n ${i.kind}"><span>${ICON[i.kind]}</span></div><div style="flex:1"><b>${esc(i.title)}</b>${i.date ? ` <span class="muted">${fmtShort(i.date)}</span>` : ''}<div>${esc(i.body)}</div>
+      <div class="acts">${i.kind === 'rehab' ? '<button type="button" class="mapbtn" data-near="ttm">📍 คลินิกแพทย์แผนไทยใกล้ฉัน</button>' : ''}${i.kind === 'assess' && i.today ? '<button type="button" class="mapbtn" data-go="assess">ไปประเมิน</button>' : ''}${i.kind === 'rehab' && i.unread ? `<button type="button" class="mapbtn" data-ack="${i.key}">รับทราบ</button>` : ''}</div></div></div>`).join('')
+      : '<div class="card"><p class="muted">ยังไม่มีการแจ้งเตือน</p></div>';
+    const n = notif.unread;
+    for (const el of [$('#hbell'), $('#dot')]) { el.textContent = n > 9 ? '9+' : n || ''; el.hidden = !n; }
+  }
+  async function loadNotifs() { notif = await api('GET', '/api/patient/notifications'); renderAlerts(); }
+  async function ack(key) { await api('POST', '/api/patient/notifications/ack', { key }).catch(() => {}); await loadNotifs(); }
+  document.addEventListener('click', e => { const b = e.target.closest('[data-ack]'); if (b) ack(b.dataset.ack); });
+  function showPopup() {
+    const m = notif.popup; if (!m) return;
+    $('#mb-title').textContent = m.title; $('#mb-body').textContent = m.body; $('#mb-date').textContent = `D${m.day} · ${fmtShort(m.date)}`;
+    $('#msgbox').hidden = false; $('#mb-ack').focus();
+    $('#mb-ack').onclick = async () => { $('#msgbox').hidden = true; await ack(m.key); };
+    $('#mb-close').onclick = () => { $('#msgbox').hidden = true; };
+    $('#mb-map').onclick = () => openNearby('ttm');
   }
 
   // ---------- Risk chart + history (จากผลประเมินที่บันทึกจริง) ----------
@@ -250,9 +319,12 @@
   const fmtDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { dateStyle: 'long' });
   function renderProfile() {
     $('#b-hn').textContent = me.hn; $('#b-name').textContent = me.name; $('#b-date').textContent = fmtDate(me.deliveryDate);
-    $('#b-days').textContent = me.days + ' วัน'; $('#b-mode').textContent = me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด';
-    $('#me-name').textContent = me.name; $('#me-sub').textContent = `HN ${me.hn} · หลังคลอด ${me.days} วัน · ${me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'ทางช่องคลอด'}`;
-    form.elements.days.value = me.days; form.elements.delivery.value = me.deliveryMode;
+    $('#b-days').textContent = me.days < 0 ? `ก่อนคลอด (อีก ${-me.days} วัน)` : `D${me.days}` + (me.days === 0 ? ' (วันคลอด)' : ''); $('#b-mode').textContent = me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด';
+    $('#b-age').textContent = me.age != null ? me.age + ' ปี' : '-'; $('#b-ga').textContent = me.gestationalWeeks != null ? me.gestationalWeeks + ' สัปดาห์' : '-'; $('#b-cov').textContent = me.coverage || '-';
+    const dl = me.days < 0 ? `ก่อนคลอดอีก ${-me.days} วัน` : `D${me.days}`;
+    $('#me-name').textContent = me.name; $('#me-sub').textContent = `HN ${me.hn} · ${dl} · ${me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'ทางช่องคลอด'}`;
+    const chip = $('#dchip'); chip.hidden = false; chip.textContent = me.days < 0 ? `ก่อนคลอดอีก ${-me.days} วัน` : me.days === 0 ? 'วันนี้คือวันคลอด (D0)' : `วันนี้ D${me.days} หลังคลอด`;
+    form.elements.delivery.value = me.deliveryMode;
   }
 
   // ---------- Mic (Web Speech, เมื่อเบราว์เซอร์รองรับ) ----------
@@ -275,8 +347,8 @@
     me = await api('GET', '/api/patient/me');
     [kb] = await Promise.all([api('GET', '/api/patient/knowledge'), loadHistory().catch(() => {})]);
     login.hidden = true; $('#bottom').hidden = false;
-    renderProfile(); renderKnowledge(); renderAlerts(); rerun(); resetChat(); await loadHistory();
-    show(location.hash.slice(1));
+    renderProfile(); renderKnowledge(); resetChat(); await loadHistory(); buildDayOptions(); loadDay(); await loadNotifs();
+    show(location.hash.slice(1)); showPopup();
   }
   api('GET', '/api/patient/me').then(startApp, () => showLogin());
 })();

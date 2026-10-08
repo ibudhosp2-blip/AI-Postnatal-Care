@@ -112,5 +112,25 @@
     });
     return { promise, cancel() { if (!stopped) { cleanup(); } } };
   }
-  window.PNCFace = { init, scan, liveScan };
+  // ---- โหมดสาธิต (mockup): เปิดกล้อง + แสดงขั้นตอนสแกน แล้ว "ผ่าน" เสมอ — ไม่โหลดโมเดล ไม่ส่งภาพ ไม่ล้มเหลว ----
+  function mockScan(container, { ms = 2800 } = {}) {
+    injectStyle();
+    container.innerHTML = '<div class="pnc-cam"><video playsinline muted autoplay></video><div class="oval"></div></div><div class="pnc-stat" role="status" aria-live="polite">กำลังเปิดกล้อง...</div>';
+    const box = container.querySelector('.pnc-cam'), video = container.querySelector('video'), stat = container.querySelector('.pnc-stat');
+    let stream = null, dead = false, timers = [];
+    const later = (fn, t) => timers.push(setTimeout(() => { if (!dead) fn(); }, t));
+    const cleanup = () => { dead = true; timers.forEach(clearTimeout); if (stream) stream.getTracks().forEach(t => t.stop()); video.srcObject = null; };
+    const promise = new Promise((resolve) => {
+      (async () => {
+        let cam = true;
+        try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false }); if (dead) { stream.getTracks().forEach(t => t.stop()); return; } video.srcObject = stream; await video.play().catch(() => {}); }
+        catch { cam = false; }
+        box.className = 'pnc-cam go'; stat.textContent = cam ? 'กำลังสแกนใบหน้า...' : 'ไม่พบกล้อง — ข้ามการสแกน (โหมดสาธิต)';
+        later(() => { box.className = 'pnc-cam ok'; stat.textContent = '✓ สแกนผ่าน (โหมดสาธิต)'; }, ms * 0.7);
+        later(() => { cleanup(); resolve({ descriptor: null, photo: null, mock: true }); }, ms);
+      })();
+    });
+    return { promise, cancel: cleanup };
+  }
+  window.PNCFace = { init, scan, liveScan, mockScan };
 })();

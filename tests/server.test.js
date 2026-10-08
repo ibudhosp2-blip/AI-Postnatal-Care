@@ -30,6 +30,7 @@ const daysAgo = (n) => new Date(Date.now() + 7 * 3600e3 - n * 86400e3).toISOStri
 test.before(async () => {
   fakeAI = http.createServer((req, res) => { let b = ''; req.on('data', c => b += c); req.on('end', () => { aiCalls.push({ auth: req.headers.authorization, body: JSON.parse(b) }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'ตอบจาก AI จำลอง' } }] })); }); }).listen(0);
   fakeLine = http.createServer((req, res) => { let b = ''; req.on('data', c => b += c); req.on('end', () => { lineCalls.push({ auth: req.headers.authorization, body: JSON.parse(b) }); res.statusCode = 200; res.end('{}'); }); }).listen(0);
+  process.env.SEED_MOCK = '0'; process.env.FACE_MOCK = '0';
   process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${fakeAI.address().port}`;
   process.env.LINE_API_BASE = `http://127.0.0.1:${fakeLine.address().port}`;
   srv = await start({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mt-')), port: 0 });
@@ -236,4 +237,108 @@ test('static: app served, data dir and dotfiles are not, traversal blocked', asy
   assert.strictEqual((await call(jar(), 'GET', '/..%2fserver/index.js')).status, 404);
   assert.strictEqual((await call(jar(), 'GET', '/../package.json')).status, 404);
   assert.strictEqual((await call(jar(), 'GET', '/db.json')).status, 404);
+});
+
+// ---------------- new behaviours: mock face pass, HN normalisation, D-counting, backfill, reminders, seed ----------------
+const setClock = (d) => call(admin, 'PUT', '/api/admin/settings', { demo: { today: d } });
+const addD = (d, n) => new Date(Date.parse(d) + n * 86400e3).toISOString().slice(0, 10);
+
+test('mockup mode: after step 1 anyone passes the face step (toggle by admin1); off → real matching again', async () => {
+  const mk = await call(admin, 'POST', '/api/admin/patients', { hn: '69-0005', name: 'กล้วยไม้ พุทธา', deliveryDate: daysAgo(3), deliveryMode: 'vaginal', age: 28, gestationalWeeks: 37, coverage: 'เบิกได้' });
+  assert.strictEqual(mk.status, 200); assert.strictEqual(mk.data.coverage, 'เบิกได้');
+  assert.strictEqual((await plogin(jar(), '690005', 'กล้วยไม้', desc(1))).status, 409);         // real matching: no enrolled face → refused
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: true } });
+  const j = jar(); const id = await call(j, 'POST', '/api/patient/identify', { id: '69-0005', namePart: 'กล้วยไม้' });
+  assert.strictEqual(id.data.mock, true);
+  assert.strictEqual((await call(j, 'POST', '/api/patient/login', {})).status, 200);              // no descriptor needed
+  assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: '690005', namePart: 'ผิดชื่อ' })).status, 401);   // step 1 still enforced
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: false } });
+  assert.strictEqual((await plogin(jar(), '690005', 'กล้วยไม้', desc(1))).status, 409);
+});
+test('HN works with or without "-" (and duplicates are detected ignoring "-")', async () => {
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: true } });
+  for (const id of ['69-0005', '690005', ' 69 0005 ']) assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id, namePart: 'พุทธา' })).status, 200, id);
+  assert.strictEqual((await call(admin, 'POST', '/api/admin/patients', { hn: '690005', name: 'ซ้ำ ซ้อน', deliveryDate: daysAgo(1), deliveryMode: 'vaginal' })).status, 409);
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: false } });
+});
+
+let cp, cj;
+test('D counting: D0 = delivery day (cannot assess), D1 next day; future delivery date allowed', async () => {
+  await setClock('2026-11-01');
+  const r = await call(admin, 'POST', '/api/admin/patients', { hn: 'D001', name: 'ทดสอบ ดีวัน', deliveryDate: '2026-11-01', deliveryMode: 'vaginal' }); cp = r.data;
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: true } });
+  cj = jar(); await plogin(cj, 'D001', 'ดีวัน', null);
+  assert.strictEqual((await call(cj, 'GET', '/api/patient/me')).data.days, 0);
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { input: { pain: 1 } })).status, 400);        // D0
+  await setClock('2026-11-02');
+  assert.strictEqual((await call(cj, 'GET', '/api/patient/me')).data.days, 1);
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { input: { pain: 1 } })).data.day, 1);
+  const fut = await call(admin, 'POST', '/api/admin/patients', { hn: 'D002', name: 'ยังไม่คลอด', deliveryDate: '2026-11-20', deliveryMode: 'cesarean' }); assert.strictEqual(fut.status, 200);
+  const fj = jar(); await plogin(fj, 'D002', 'ยังไม่คลอด', null);
+  assert.ok((await call(fj, 'GET', '/api/patient/me')).data.days < 0);
+  assert.strictEqual((await call(fj, 'POST', '/api/patient/assessment', { input: {} })).status, 400);
+});
+test('backfill: can fill past days, skip days, not the future; one result per day (replaced)', async () => {
+  await setClock('2026-11-06');                                                                     // today = D5
+  const A = (body) => call(cj, 'POST', '/api/patient/assessment', body);
+  assert.strictEqual((await A({ forDay: 3, input: { pain: 2 } })).data.day, 3);                     // backfill D3 (forgot)
+  assert.strictEqual((await A({ forDay: 6, input: {} })).status, 400);                              // future
+  assert.strictEqual((await A({ forDay: 0, input: {} })).status, 400);
+  assert.strictEqual((await A({ forDay: 2.5, input: {} })).status, 400);
+  assert.strictEqual((await A({ input: { pain: 8 } })).data.day, 5);                                // today (D5), D2 and D4 skipped → allowed
+  const again = await A({ forDay: 5, input: { pain: 2 } }); assert.strictEqual(again.data.replaced, true);
+  const list = (await call(cj, 'GET', '/api/patient/assessments')).data;
+  assert.deepStrictEqual(list.map(a => a.day), [1, 3, 5]); assert.strictEqual(list[2].level, 'green');
+  const dash = (await call(admin, 'GET', '/api/staff/dashboard')).data.rows.find(r => r.hn === 'D001');
+  assert.strictEqual(dash.days, 5); assert.strictEqual(dash.missed, 2);                             // D2, D4 not filled
+});
+test('reminders: vaginal D7–D11, cesarean D30–D34 (5 daily), popup, ack, bell count', async () => {
+  const N = async (jr) => (await call(jr, 'GET', '/api/patient/notifications')).data;
+  await setClock('2026-11-02');                                                                     // D1 for D001 (delivery 11-01)
+  let n = await N(cj); assert.strictEqual(n.popup, null); assert.ok(n.items.some(i => i.kind === 'info' && i.day === 7));
+  await setClock('2026-11-08');                                                                     // D7
+  n = await N(cj); assert.strictEqual(n.popup.key, 'rehab-1'); assert.strictEqual(n.popup.day, 7); assert.strictEqual(n.popup.today, true);
+  assert.ok(n.unread >= 1);
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/notifications/ack', { key: 'rehab-1' })).status, 200);
+  n = await N(cj); assert.strictEqual(n.popup, null);
+  await setClock('2026-11-09'); n = await N(cj); assert.strictEqual(n.popup.key, 'rehab-2');       // D8 → 2/5
+  await setClock('2026-11-12'); n = await N(cj); assert.strictEqual(n.items.filter(i => i.kind === 'rehab').length, 5);   // D11 = 5th
+  assert.strictEqual(n.popup.key, 'rehab-5');
+  await setClock('2026-11-30'); n = await N(cj); assert.strictEqual(n.items.filter(i => i.kind === 'rehab').length, 5);   // never more than 5
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/notifications/ack', { key: 'evil' })).status, 404);
+  // cesarean
+  await call(admin, 'POST', '/api/admin/patients', { hn: 'C001', name: 'ผ่าคลอด ทดสอบ', deliveryDate: '2026-12-01', deliveryMode: 'cesarean' });
+  const cz = jar(); await plogin(cz, 'C001', 'ผ่าคลอด', null);
+  for (const [today, want] of [['2026-12-30', null], ['2026-12-31', 'rehab-1'], ['2027-01-04', 'rehab-5']]) { await setClock(today); const x = await N(cz); assert.strictEqual(x.popup ? x.popup.key : null, want, today); }
+  await setClock('2027-01-05'); assert.strictEqual((await N(cz)).items.filter(i => i.kind === 'rehab').length, 5);
+});
+test('assessment saves referral hint: red → hospital, ttm-only orange → ttm', async () => {
+  await setClock('2026-11-06');
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 4, input: { bleeding: 'heavy' } })).data.referral, 'hospital');
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 2, input: { engorgement: true, milk: 'low' } })).data.referral, 'ttm');
+  assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 2, input: { tempC: 38.5 } })).data.referral, 'both');
+});
+test('chat triage never overwrites a fuller assessment unless it is more severe', async () => {
+  await setClock('2026-11-06');
+  await call(cj, 'POST', '/api/patient/assessment', { forDay: 5, input: { pain: 2, tempC: 36.7, sys: 110, dia: 70 } });
+  const k = await call(cj, 'POST', '/api/patient/assessment', { forDay: 5, source: 'chat', input: { pain: 0 } });
+  assert.strictEqual(k.data.kept, true);
+  const w = await call(cj, 'POST', '/api/patient/assessment', { forDay: 5, source: 'chat', input: { bleeding: 'heavy' } });
+  assert.strictEqual(w.data.level, 'red'); assert.ok(!w.data.kept);
+  assert.strictEqual((await call(cj, 'GET', '/api/patient/assessments')).data.find(a => a.day === 5).level, 'red');
+});
+test('seed: mock patients (10) added by admin1 once, accessible by HN with or without dash', async () => {
+  const r = await call(admin, 'POST', '/api/admin/seed-mock', {}); assert.strictEqual(r.data.added, 9);       // 69-0005 already exists
+  assert.strictEqual((await call(admin, 'POST', '/api/admin/seed-mock', {})).data.added, 0);
+  const list = (await call(admin, 'GET', '/api/admin/patients')).data;
+  assert.strictEqual(list.filter(p => /^69/.test(p.hn)).length, 10);
+  const p = list.find(x => x.hn === '690002'); assert.deepStrictEqual([p.name, p.age, p.gestationalWeeks, p.coverage, p.deliveryMode, p.deliveryDate], ['กุหลาบ พุทธา', 21, 37, 'เบิกได้', 'cesarean', '2026-10-08']);
+  assert.strictEqual(list.find(x => x.hn === '69-0010').deliveryDate, '2026-10-27');
+  await setClock('');
+});
+test('fresh database auto-seeds the 10 mockup patients (SEED_MOCK=0 disables)', async () => {
+  delete process.env.SEED_MOCK; const s2 = await start({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mt2-')), port: 0 });
+  const b2 = `http://127.0.0.1:${s2.port}`; const j2 = jar();
+  const old = base; try { base = b2; await call(j2, 'POST', '/api/auth/login', { username: 'admin1', password: 'admin1234' }, { 'cf-connecting-ip': '10.9.9.9' }); await call(j2, 'POST', '/api/auth/change-password', { current: 'admin1234', new: 'Admin-pass-9' });
+    const got = await call(j2, 'GET', '/api/admin/patients'); assert.strictEqual(got.data.length, 10, JSON.stringify(got.data).slice(0, 200)); } finally { base = old; await s2.close(); process.env.SEED_MOCK = '0'; }
 });

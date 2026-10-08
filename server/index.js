@@ -24,8 +24,16 @@ const SAFETY_PROMPT = [
 
 // ---------- helpers ----------
 const bkkToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
-const daysSince = (d) => Math.floor((Date.parse(bkkToday()) - Date.parse(d)) / 86400e3);
-const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) && s <= bkkToday() && s >= '2000-01-01';
+const addDays = (d, n) => new Date(Date.parse(d) + n * 86400e3).toISOString().slice(0, 10);
+const hnKey = (s) => String(s || '').toLowerCase().replace(/[\s._-]/g, '');   // "69-0005" ≡ "690005"
+const COVERAGE = ['เบิกได้', 'ประกันสังคม', 'บัตรทอง', 'ชำระเงินเอง', 'อื่นๆ'];
+const MOCK_PATIENTS = [   // mockup data (ไม่ใช่คนไข้จริง) — วันที่คลอดตามตาราง mockup (พ.ศ. 2569 = ค.ศ. 2026)
+  ['มะลิ พุทธา', 17, 36, '690001', 'เบิกได้', 'vaginal', '2026-10-08'], ['กุหลาบ พุทธา', 21, 37, '690002', 'เบิกได้', 'cesarean', '2026-10-08'],
+  ['บานชื่น พุทธา', 23, 36, '690003', 'ประกันสังคม', 'cesarean', '2026-10-09'], ['บัวบาน พุทธา', 27, 37, '690004', 'ประกันสังคม', 'vaginal', '2026-10-10'],
+  ['กล้วยไม้ พุทธา', 28, 37, '69-0005', 'เบิกได้', 'vaginal', '2026-10-11'], ['ดอกดิบ พุทธา', 30, 38, '69-0006', 'บัตรทอง', 'vaginal', '2026-10-15'],
+  ['ดาหลา พุทธา', 32, 38, '69-0007', 'บัตรทอง', 'vaginal', '2026-10-17'], ['ดาวเรือง พุทธา', 34, 27, '69-0008', 'เบิกได้', 'cesarean', '2026-10-21'],
+  ['แววมยุรา พุทธา', 38, 40, '69-0009', 'เบิกได้', 'cesarean', '2026-10-25'], ['กาซะลอง พุทธา', 42, 36, '69-0010', 'บัตรทอง', 'cesarean', '2026-10-27'],
+];
 const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const normName = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
 const normPhone = (v) => { let d = String(v || '').replace(/[\s-]/g, ''); if (d.startsWith('+66')) d = '0' + d.slice(3); else if (d.startsWith('66') && d.length === 11) d = '0' + d.slice(2); return /^\d{9,10}$/.test(d) ? d : ''; };
@@ -62,6 +70,11 @@ function send(res, status, body, headers = {}) {
 async function createApp({ dataDir }) {
   const S = await storeLib.open(dataDir);
   const { db } = S;
+  const todayStr = () => (db.settings.demo && db.settings.demo.today) || bkkToday();
+  const daysSince = (d) => Math.floor((Date.parse(todayStr()) - Date.parse(d)) / 86400e3);     // D0 = วันคลอด, D1 = วันถัดไป
+  const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && v >= '2000-01-01' && v <= addDays(todayStr(), 300);
+  if (db.settings.face.mockPass === undefined) { db.settings.face.mockPass = process.env.FACE_MOCK !== '0'; S.save(); }
+  const mockPass = () => db.settings.face.mockPass !== false;
   const dummyHash = await sec.hashPassword(crypto.randomUUID());
   const routes = [];
   const route = (method, pattern, auth, handler) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), auth, handler });
@@ -72,8 +85,8 @@ async function createApp({ dataDir }) {
   const patientById = (id) => db.patients.find(p => p.id === id);
   const logAs = (ctx, action, detail) => S.audit(ctx.who, action, detail);
 
-  const publicPatient = (p) => ({ id: p.id, hn: p.hn, name: p.name, deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, lineUserId: p.lineUserId || '', phone: p.phone || '', hasFace: !!p.descriptor, createdAt: p.createdAt });
-  const latestOf = (pid) => db.assessments.filter(a => a.patientId === pid).sort((a, b) => b.at.localeCompare(a.at))[0] || null;
+  const publicPatient = (p) => ({ id: p.id, hn: p.hn, name: p.name, deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, lineUserId: p.lineUserId || '', phone: p.phone || '', age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '', hasFace: !!p.descriptor, createdAt: p.createdAt });
+  const latestOf = (pid) => db.assessments.filter(a => a.patientId === pid).sort((a, b) => b.day - a.day || b.at.localeCompare(a.at))[0] || null;
   const secret = (enc) => (enc ? S.cipher.decStr(enc) : '');
 
   // ===== auth (staff) =====
@@ -110,31 +123,32 @@ async function createApp({ dataDir }) {
   // ===== patient auth & self-service =====
   // Step 1: HN or phone + part of name -> short-lived "pre" session. Step 2: live face match -> real session.
   const findByIdent = (ident) => {
-    const t = str(ident, 30).toLowerCase(); if (!t) return null;
-    const byHn = db.patients.find(x => x.hn.toLowerCase() === t); if (byHn) return byHn;
+    const t = hnKey(str(ident, 30)); if (!t) return null;
+    const byHn = db.patients.find(x => hnKey(x.hn) === t); if (byHn) return byHn;
     const ph = normPhone(ident); return ph ? db.patients.find(x => x.phone === ph) || null : null;
   };
   route('POST', '/api/patient/identify', null, (ctx) => {
     const ident = str(ctx.body.id, 30), namePart = normName(str(ctx.body.namePart, 60));
-    const k1 = `plogin:${ctx.ip}`, k2 = `plogin-id:${normName(ident)}`;
+    const k1 = `plogin:${ctx.ip}`, k2 = `plogin-id:${hnKey(ident) || normName(ident)}`;
     if (sec.isBlocked(k1, 20) || sec.isBlocked(k2, 5)) bad('พยายามมากเกินไป กรุณารอ 15 นาทีหรือติดต่อเจ้าหน้าที่', 429);
     const p = findByIdent(ident);
     if (!p || namePart.length < 2 || !normName(p.name).includes(namePart)) { sec.hit(k1, 20, 15 * 60e3); sec.hit(k2, 5, 15 * 60e3); bad('ข้อมูลไม่ตรงกับระบบ กรุณาตรวจสอบ HN/เบอร์โทร และชื่ออีกครั้ง', 401); }
     sec.destroySession(cookies(ctx.req).pat_pre);
     const token = sec.createSession({ kind: 'patient-pre', patientId: p.id, fails: 0, key: k2 }, 5 * 60e3, false);
     setCookie(ctx.req, ctx.res, 'pat_pre', token, 5 * 60);
-    return { ok: true, hasFace: !!p.descriptor };
+    return { ok: true, hasFace: !!p.descriptor, mock: mockPass() };
   });
   route('POST', '/api/patient/login', null, (ctx) => {
     const tok = cookies(ctx.req).pat_pre, pre = sec.getSession(tok);
     if (!pre || pre.kind !== 'patient-pre') bad('หมดเวลา กรุณากรอก HN/เบอร์โทรและชื่อใหม่อีกครั้ง', 401);
     const p = patientById(pre.patientId); const d = ctx.body.descriptor;
     if (!p) bad('ไม่พบข้อมูล', 401);
-    if (!p.descriptor) bad('คุณยังไม่ได้ลงทะเบียนใบหน้า กรุณาติดต่อเจ้าหน้าที่', 409);
-    if (!Array.isArray(d) || d.length !== 128 || !d.every(n => Number.isFinite(n) && Math.abs(n) < 5)) bad('สแกนใบหน้าไม่สำเร็จ กรุณาลองใหม่');
+    const mock = mockPass();       // โหมดสาธิต (mockup): ผ่านทุกคนที่ผ่านขั้นที่ 1 โดยไม่เทียบใบหน้า
+    if (!mock && !p.descriptor) bad('คุณยังไม่ได้ลงทะเบียนใบหน้า กรุณาติดต่อเจ้าหน้าที่', 409);
+    if (!mock && (!Array.isArray(d) || d.length !== 128 || !d.every(n => Number.isFinite(n) && Math.abs(n) < 5))) bad('สแกนใบหน้าไม่สำเร็จ กรุณาลองใหม่');
     if (sec.isBlocked(pre.key, 5) || sec.isBlocked(`plogin:${ctx.ip}`, 20)) bad('พยายามมากเกินไป กรุณารอ 15 นาทีหรือติดต่อเจ้าหน้าที่', 429);
-    const dist = Math.hypot(...p.descriptor.map((v, i) => v - d[i]));
-    if (!(dist < db.settings.face.threshold)) {
+    const dist = mock ? 0 : Math.hypot(...p.descriptor.map((v, i) => v - d[i]));
+    if (!mock && !(dist < db.settings.face.threshold)) {
       sec.hit(pre.key, 5, 15 * 60e3); sec.hit(`plogin:${ctx.ip}`, 20, 15 * 60e3);
       if (++pre.fails >= 3) { sec.destroySession(tok); setCookie(ctx.req, ctx.res, 'pat_pre', '', 0); bad('สแกนใบหน้าไม่ผ่านหลายครั้ง กรุณากรอกข้อมูลใหม่อีกครั้ง', 401); }
       bad('ใบหน้าไม่ตรงกับข้อมูลในระบบ กรุณาลองอีกครั้ง', 401);
@@ -148,27 +162,62 @@ async function createApp({ dataDir }) {
   route('POST', '/api/patient/logout', null, (ctx) => { sec.destroySession(cookies(ctx.req).pat_sid); setCookie(ctx.req, ctx.res, 'pat_sid', '', 0); return { ok: true }; });
   route('GET', '/api/patient/me', 'patient', (ctx) => {
     const p = ctx.patient;
-    return { hn: p.hn, name: p.name, deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, days: daysSince(p.deliveryDate) };
+    return { hn: p.hn, name: p.name, deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, days: daysSince(p.deliveryDate), age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '', today: todayStr() };
   });
 
   const num = (v, lo, hi) => { if (v === '' || v == null) return null; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) bad('ค่าที่กรอกไม่อยู่ในช่วงที่เป็นไปได้'); return n; };
   const BOOLS = ['chestOrBreath', 'seizure', 'headacheVision', 'selfHarm', 'foulLochia', 'severeAbdPain', 'calfPain', 'woundProblem', 'breastRed', 'engorgement', 'hxPPH'];
   route('POST', '/api/patient/assessment', 'patient', (ctx) => {
-    const b = ctx.body.input || {}, p = ctx.patient;
+    const b = ctx.body.input || {}, p = ctx.patient, today = daysSince(p.deliveryDate);
+    if (today < 1) bad(today === 0 ? 'วันนี้คือวันคลอด (D0) เริ่มประเมินได้ตั้งแต่พรุ่งนี้ (D1)' : 'ยังไม่ถึงวันคลอด เริ่มประเมินได้หลังคลอด (D1)');
+    const forDay = ctx.body.forDay == null ? today : Number(ctx.body.forDay);   // กรอกย้อนหลังได้ (เช่น ลืมกรอก) แต่ไม่ล่วงหน้า
+    if (!Number.isInteger(forDay) || forDay < 1 || forDay > today) bad('เลือกวันได้ตั้งแต่ D1 ถึงวันนี้ (D' + today + ')');
     const input = {
-      days: daysSince(p.deliveryDate), delivery: p.deliveryMode,
+      days: forDay, delivery: p.deliveryMode,
       bleeding: ['normal', 'clots', 'heavy'].includes(b.bleeding) ? b.bleeding : 'normal',
       milk: ['enough', 'low', 'none'].includes(b.milk) ? b.milk : 'enough',
       tempC: num(b.tempC, 30, 45), pain: num(b.pain, 0, 10), sys: num(b.sys, 50, 260), dia: num(b.dia, 30, 160), epds: num(b.epds, 0, 30), sleepHours: num(b.sleepHours, 0, 24),
     };
     for (const k of BOOLS) input[k] = b[k] === true;
     const r = risk.assess(input);
-    const rec = { id: crypto.randomUUID(), patientId: p.id, at: new Date().toISOString(), day: input.days, input, level: r.level, reasons: r.reasons.map(x => x.text) };
-    db.assessments.push(rec); S.save();
-    return { level: r.level, day: rec.day };
+    const rec = { id: crypto.randomUUID(), patientId: p.id, at: new Date().toISOString(), day: forDay, date: addDays(p.deliveryDate, forDay), backfilled: forDay !== today, input, level: r.level, reasons: r.reasons.map(x => x.text), referral: r.referral };
+    const i = db.assessments.findIndex(a => a.patientId === p.id && a.day === forDay);      // หนึ่งวันมีผลเดียว: บันทึกซ้ำ = แทนที่
+    if (ctx.body.source === 'chat' && i >= 0 && risk.LEVELS[db.assessments[i].level].rank >= risk.LEVELS[rec.level].rank)
+      return { level: db.assessments[i].level, day: forDay, referral: db.assessments[i].referral || null, kept: true };   // แชทคัดกรองสั้น ๆ ไม่เขียนทับผลประเมินที่ละเอียดกว่า (เว้นแต่รุนแรงขึ้น)
+    if (i >= 0) db.assessments[i] = rec; else db.assessments.push(rec);
+    S.save();
+    return { level: r.level, day: rec.day, referral: r.referral, replaced: i >= 0 };
   });
   route('GET', '/api/patient/assessments', 'patient', (ctx) =>
-    db.assessments.filter(a => a.patientId === ctx.patient.id).sort((a, b) => a.at.localeCompare(b.at)).map(a => ({ at: a.at, day: a.day, level: a.level, reasons: a.reasons })));
+    db.assessments.filter(a => a.patientId === ctx.patient.id).sort((a, b) => a.day - b.day).map(a => ({ at: a.at, day: a.day, date: a.date, level: a.level, reasons: a.reasons, referral: a.referral || null, input: a.input })));
+
+  // ---- notifications: rehab reminders (5 daily, from D7 vaginal / D30 cesarean) + today's assessment reminder ----
+  const REHAB_TIMES = 5;
+  const rehabStart = (p) => (p.deliveryMode === 'cesarean' ? 30 : 7);
+  function notificationsFor(p) {
+    const D = daysSince(p.deliveryDate), start = rehabStart(p), items = [];
+    for (let n = 1; n <= REHAB_TIMES; n++) {
+      const day = start + n - 1; if (D < day) continue;
+      const key = `rehab-${n}`;
+      items.push({ key, kind: 'rehab', n, day, date: addDays(p.deliveryDate, day), today: D === day, unread: !(p.acks && p.acks[key]),
+        title: 'เตือนทำฟื้นฟูมารดาหลังคลอด', body: `ครั้งที่ ${n} จาก ${REHAB_TIMES} (D${day}) ทำต่อเนื่องทุกวัน — ปรึกษาแพทย์แผนไทยก่อนทำหัตถการ เช่น นวด ประคบสมุนไพร ทับหม้อเกลือ` });
+    }
+    if (D >= 1) {
+      const done = new Set(db.assessments.filter(a => a.patientId === p.id).map(a => a.day));
+      const missed = []; for (let d = Math.max(1, D - 13); d < D; d++) if (!done.has(d)) missed.push(d);      // นับย้อนหลังไม่เกิน 14 วัน
+      if (!done.has(D)) items.push({ key: `assess-${D}`, kind: 'assess', day: D, today: true, unread: true, title: `ประเมินอาการวันนี้ (D${D})`, body: 'กรุณาประเมินอาการประจำวัน' + (missed.length ? ` — ยังไม่ได้ประเมิน: ${missed.map(x => 'D' + x).join(', ')} (กรอกย้อนหลังได้)` : '') });
+      else if (missed.length) items.push({ key: `missed-${D}`, kind: 'assess', day: D, today: false, unread: false, title: 'มีวันที่ยังไม่ได้ประเมิน', body: `${missed.map(x => 'D' + x).join(', ')} (กรอกย้อนหลังได้ หรือเว้นไว้ก็ได้)` });
+    }
+    if (D < start) items.push({ key: 'rehab-upcoming', kind: 'info', today: false, unread: false, day: start, date: addDays(p.deliveryDate, start), title: 'ฟื้นฟูมารดาหลังคลอด', body: `ระบบจะเตือนทำฟื้นฟู ${REHAB_TIMES} ครั้ง ทุกวัน เริ่มที่ D${start} (${p.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด'})` });
+    items.sort((a, b) => (b.unread - a.unread) || (b.day - a.day));
+    const popup = items.filter(i => i.kind === 'rehab' && i.unread).sort((a, b) => b.day - a.day)[0] || null;
+    return { day: D, unread: items.filter(i => i.unread).length, popup, items };
+  }
+  route('GET', '/api/patient/notifications', 'patient', (ctx) => notificationsFor(ctx.patient));
+  route('POST', '/api/patient/notifications/ack', 'patient', (ctx) => {
+    const key = str(ctx.body.key, 20); if (!/^rehab-[1-5]$/.test(key)) bad('ไม่พบข้อความ', 404);
+    ctx.patient.acks = { ...(ctx.patient.acks || {}), [key]: new Date().toISOString() }; S.save(); return { ok: true };
+  });
   route('GET', '/api/patient/knowledge', 'patient', () => ({
     herbs: db.knowledge.herbs, myths: db.knowledge.myths, library: db.knowledge.library,
     aiEnabled: !!(db.settings.openrouter.enabled && db.settings.openrouter.keyEnc),
@@ -217,7 +266,8 @@ async function createApp({ dataDir }) {
       openrouter: { hasKey: !!s.openrouter.keyEnc, model: s.openrouter.model, enabled: s.openrouter.enabled, systemPrompt: s.openrouter.systemPrompt },
       his: { url: s.his.url, hasToken: !!s.his.tokenEnc, enabled: s.his.enabled },
       line: { hasToken: !!s.line.tokenEnc },
-      face: { threshold: s.face.threshold },
+      face: { threshold: s.face.threshold, mockPass: s.face.mockPass !== false },
+      demo: { today: (s.demo && s.demo.today) || '', realToday: bkkToday() },
     };
   };
   route('GET', '/api/admin/settings', 'admin1', () => maskedSettings());
@@ -242,6 +292,8 @@ async function createApp({ dataDir }) {
       if (typeof b.line.token === 'string' && b.line.token.trim()) s.line.tokenEnc = S.cipher.encStr(b.line.token.trim().slice(0, 500));
       if (b.line.clearToken === true) s.line.tokenEnc = '';
     }
+    if (b.face && typeof b.face.mockPass === 'boolean') s.face.mockPass = b.face.mockPass;
+    if (b.demo && b.demo.today !== undefined) { const t = str(b.demo.today, 10); if (t && !/^\d{4}-\d{2}-\d{2}$/.test(t)) bad('วันที่สมมติไม่ถูกต้อง'); s.demo = { today: t }; }
     if (b.face && b.face.threshold != null) { const t = Number(b.face.threshold); if (!(t >= 0.3 && t <= 0.6)) bad('ค่าความเข้มงวดต้องอยู่ระหว่าง 0.30–0.60'); s.face.threshold = t; }
     S.save(); logAs(ctx, 'settings-update'); return maskedSettings();
   });
@@ -256,10 +308,13 @@ async function createApp({ dataDir }) {
   }
   function readDescriptor(d) { if (!Array.isArray(d) || d.length !== 128 || !d.every(n => Number.isFinite(n) && Math.abs(n) < 5)) bad('ข้อมูลใบหน้าไม่ถูกต้อง'); return d; }
   function applyPatient(p, b, isNew) {
-    if (isNew || b.hn !== undefined) { const hn = str(b.hn, 20); if (!/^[A-Za-z0-9._-]{1,20}$/.test(hn)) bad('HN ใช้ได้เฉพาะตัวอักษร/ตัวเลข . _ - (ไม่เกิน 20 ตัว)'); if (db.patients.some(x => x.id !== p.id && x.hn.toLowerCase() === hn.toLowerCase())) bad('HN นี้มีอยู่แล้ว', 409); p.hn = hn; }
+    if (isNew || b.hn !== undefined) { const hn = str(b.hn, 20); if (!/^[A-Za-z0-9._-]{1,20}$/.test(hn)) bad('HN ใช้ได้เฉพาะตัวอักษร/ตัวเลข . _ - (ไม่เกิน 20 ตัว)'); if (db.patients.some(x => x.id !== p.id && hnKey(x.hn) === hnKey(hn))) bad('HN นี้มีอยู่แล้ว (ไม่นับเครื่องหมาย -)', 409); p.hn = hn; }
     if (isNew || b.name !== undefined) { const n = str(b.name, 100); if (n.length < 2) bad('กรุณากรอกชื่อคนไข้'); p.name = n; }
-    if (isNew || b.deliveryDate !== undefined) { if (!isDate(b.deliveryDate)) bad('วันที่คลอดไม่ถูกต้อง (ต้องไม่เกินวันนี้)'); p.deliveryDate = b.deliveryDate; }
+    if (isNew || b.deliveryDate !== undefined) { if (!isDate(b.deliveryDate)) bad('วันที่คลอดไม่ถูกต้อง'); p.deliveryDate = b.deliveryDate; }
     if (isNew || b.deliveryMode !== undefined) { if (!['vaginal', 'cesarean'].includes(b.deliveryMode)) bad('ลักษณะการคลอดไม่ถูกต้อง'); p.deliveryMode = b.deliveryMode; }
+    if (b.age !== undefined) { if (b.age === null || b.age === '') p.age = null; else { const n = Number(b.age); if (!Number.isInteger(n) || n < 10 || n > 60) bad('อายุไม่ถูกต้อง'); p.age = n; } }
+    if (b.gestationalWeeks !== undefined) { if (b.gestationalWeeks === null || b.gestationalWeeks === '') p.gestationalWeeks = null; else { const n = Number(b.gestationalWeeks); if (!Number.isInteger(n) || n < 20 || n > 45) bad('อายุครรภ์ไม่ถูกต้อง (20–45 สัปดาห์)'); p.gestationalWeeks = n; } }
+    if (b.coverage !== undefined) { const c = str(b.coverage, 30); if (c && !COVERAGE.includes(c)) bad('สิทธิ์การรักษาไม่ถูกต้อง'); p.coverage = c; }
     if (b.phone !== undefined) { const raw = str(b.phone, 20); const ph = raw ? normPhone(raw) : ''; if (raw && !ph) bad('เบอร์โทรไม่ถูกต้อง (9–10 หลัก)'); if (ph && db.patients.some(x => x.id !== p.id && x.phone === ph)) bad('เบอร์โทรนี้ถูกใช้กับคนไข้รายอื่นแล้ว', 409); p.phone = ph; }
     if (b.lineUserId !== undefined) { const l = str(b.lineUserId, 60); if (l && !/^[A-Za-z0-9]+$/.test(l)) bad('LINE userId ไม่ถูกต้อง'); p.lineUserId = l; }
     if (b.descriptor) p.descriptor = readDescriptor(b.descriptor);
@@ -330,9 +385,9 @@ async function createApp({ dataDir }) {
     let created = 0, updated = 0, skipped = 0;
     for (const r of list.slice(0, 5000)) {
       try {
-        const existing = db.patients.find(x => x.hn.toLowerCase() === String(r.hn || '').toLowerCase());
+        const existing = db.patients.find(x => hnKey(x.hn) === hnKey(r.hn));
         const p = existing || { id: crypto.randomUUID(), createdAt: new Date().toISOString() };
-        applyPatient(p, { hn: r.hn, name: r.name, deliveryDate: r.deliveryDate, deliveryMode: r.deliveryMode, lineUserId: r.lineUserId, phone: r.phone }, !existing);
+        applyPatient(p, { hn: r.hn, name: r.name, deliveryDate: r.deliveryDate, deliveryMode: r.deliveryMode, lineUserId: r.lineUserId, phone: r.phone, age: r.age, gestationalWeeks: r.gestationalWeeks, coverage: r.coverage }, !existing);
         if (existing) updated++; else { db.patients.push(p); created++; }
       } catch { skipped++; }
     }
@@ -347,20 +402,22 @@ async function createApp({ dataDir }) {
   // ===== staff (admin2, and admin1) =====
   route('GET', '/api/staff/dashboard', 'staff', () => {
     const rows = db.patients.map(p => {
-      const a = latestOf(p.id);
-      return { id: p.id, hn: p.hn, name: p.name, days: daysSince(p.deliveryDate), deliveryMode: p.deliveryMode, hasLine: !!p.lineUserId,
-        level: a ? a.level : 'none', reasons: a ? a.reasons : [], assessedAt: a ? a.at : null };
+      const a = latestOf(p.id), D = daysSince(p.deliveryDate);
+      const done = new Set(db.assessments.filter(x => x.patientId === p.id).map(x => x.day));
+      let missed = 0; for (let d = 1; d <= D; d++) if (!done.has(d)) missed++;
+      return { id: p.id, hn: p.hn, name: p.name, days: D, deliveryMode: p.deliveryMode, age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '', hasLine: !!p.lineUserId,
+        level: a ? a.level : 'none', reasons: a ? a.reasons : [], assessedAt: a ? a.at : null, referral: a ? a.referral || null : null, missed };
     });
     const rank = { red: 0, orange: 1, yellow: 2, green: 3, none: 4 };
-    rows.sort((x, y) => rank[x.level] - rank[y.level] || (y.assessedAt || '').localeCompare(x.assessedAt || ''));
+    rows.sort((x, y) => rank[x.level] - rank[y.level] || (y.assessedAt || '').localeCompare(x.assessedAt || '') || x.hn.localeCompare(y.hn));
     const counts = { red: 0, orange: 0, yellow: 0, green: 0, none: 0 }; rows.forEach(r => counts[r.level]++);
-    return { counts, rows };
+    return { counts, rows, today: todayStr() };
   });
   route('GET', '/api/staff/patients/:id', 'staff', (ctx) => {
     const p = patientById(ctx.params.id) || bad('ไม่พบคนไข้', 404);
     return {
-      id: p.id, hn: p.hn, name: p.name, days: daysSince(p.deliveryDate), deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, hasLine: !!p.lineUserId,
-      assessments: db.assessments.filter(a => a.patientId === p.id).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30).map(a => ({ at: a.at, day: a.day, level: a.level, reasons: a.reasons })),
+      id: p.id, hn: p.hn, name: p.name, days: daysSince(p.deliveryDate), deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, hasLine: !!p.lineUserId, age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '',
+      assessments: db.assessments.filter(a => a.patientId === p.id).sort((a, b) => b.day - a.day).slice(0, 45).map(a => ({ at: a.at, day: a.day, level: a.level, reasons: a.reasons, backfilled: !!a.backfilled })),
       messages: db.messages.filter(m => m.patientId === p.id).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30),
     };
   });
@@ -383,6 +440,18 @@ async function createApp({ dataDir }) {
     if (rec.status !== 'sent') bad('ส่ง LINE ไม่สำเร็จ (' + rec.status + ')', 502);
     return { ok: true };
   });
+
+  function seedMock() {
+    let n = 0;
+    for (const [name, age, ga, hn, coverage, mode, date] of MOCK_PATIENTS) {
+      if (db.patients.some(x => hnKey(x.hn) === hnKey(hn))) continue;
+      db.patients.push({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), hn, name, age, gestationalWeeks: ga, coverage, deliveryMode: mode, deliveryDate: date, lineUserId: '', phone: '', mock: true }); n++;
+    }
+    S.save(); return n;
+  }
+  route('POST', '/api/admin/seed-mock', 'admin1', (ctx) => { const n = seedMock(); logAs(ctx, 'seed-mock', String(n)); return { added: n }; });
+  if (!db.seeded && db.patients.length === 0 && process.env.SEED_MOCK !== '0') seedMock();   // ฐานข้อมูลใหม่: ใส่คนไข้ mockup 10 ราย (ปิดด้วย SEED_MOCK=0)
+  if (!db.seeded) { db.seeded = true; S.save(); }
 
   // ---------- dispatcher ----------
   async function handle(req, res) {

@@ -59,8 +59,9 @@
   $('#lback').addEventListener('click', () => stepOne());
   $('#logout').addEventListener('click', async () => { await api('POST', '/api/patient/logout').catch(() => {}); location.hash = ''; showLogin(); });
 
-  // ---------- GPS: โรงพยาบาล / คลินิกแพทย์แผนไทย ใกล้ตัว (Google Maps, ไม่ต้องใช้ API key) ----------
-  function openNearby(kind) {
+  // ---------- GPS: สถานพยาบาลใกล้ตัว — ใช้รายการที่เจ้าหน้าที่ตั้งไว้ (เรียงตามระยะทาง) ถ้าไม่มี ใช้ค้นหา Google Maps ----------
+  let places = [];
+  function googleNearby(kind) {
     const q = kind === 'hospital' ? 'โรงพยาบาล' : 'คลินิกการแพทย์แผนไทย';
     const w = window.open('about:blank', '_blank');                               // เปิดแท็บทันที (กัน popup blocker) แล้วค่อยใส่ตำแหน่ง
     const go = (ll) => {
@@ -69,6 +70,28 @@
     };
     if (!navigator.geolocation) return go(null);
     navigator.geolocation.getCurrentPosition(pos => go({ lat: pos.coords.latitude, lng: pos.coords.longitude }), () => go(null), { timeout: 8000, maximumAge: 300000 });
+  }
+  const km = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+  const tel = (v) => String(v || '').replace(/[^0-9+]/g, '');
+  function showPlaces(kind, list) {
+    const sheet = $('#placesheet'), KT = kind === 'hospital' ? ['🏥', 'โรงพยาบาลใกล้ฉัน'] : ['🌿', 'คลินิกแพทย์แผนไทยใกล้ฉัน'];
+    $('#ps-title').textContent = `${KT[0]} ${KT[1]}`; $('#ps-sub').textContent = 'กำลังหาตำแหน่งของคุณ...';
+    const render = (me2) => {
+      const rows = list.map(p => ({ ...p, d: me2 ? km(me2, p) : null })).sort((a, b) => (a.d ?? 0) - (b.d ?? 0)).slice(0, 5);
+      $('#ps-sub').textContent = me2 ? 'เรียงตามระยะทางจากตำแหน่งของคุณ' : 'ไม่ทราบตำแหน่งของคุณ (ยังไม่ได้อนุญาต GPS) — แสดงตามรายการ';
+      $('#ps-list').innerHTML = rows.map(p => `<div class="place"><div class="pn"><b>${esc(p.name)}</b>${p.d != null ? `<span class="dist">${p.d < 1 ? Math.round(p.d * 1000) + ' ม.' : p.d.toFixed(1) + ' กม.'}</span>` : ''}</div>
+        ${p.address ? `<div class="muted">${esc(p.address)}</div>` : ''}${p.note ? `<div class="muted">${esc(p.note)}</div>` : ''}
+        <div class="refbtns" style="margin-top:6px">${tel(p.phone) ? `<a class="mapbtn" href="tel:${tel(p.phone)}">📞 ${esc(p.phone)}</a>` : ''}<a class="mapbtn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}">🧭 นำทาง</a></div></div>`).join('');
+    };
+    render(null); sheet.hidden = false;
+    if (navigator.geolocation) navigator.geolocation.getCurrentPosition(pos => render({ lat: pos.coords.latitude, lng: pos.coords.longitude }), () => {}, { timeout: 8000, maximumAge: 300000 });
+    $('#ps-google').onclick = () => googleNearby(kind);
+    $('#ps-close').onclick = () => { sheet.hidden = true; };
+  }
+  function openNearby(kind) {
+    const list = places.filter(p => p.kind === kind);
+    if (list.length) { $('#msgbox').hidden = true; return showPlaces(kind, list); }
+    googleNearby(kind);
   }
   document.addEventListener('click', e => { const b = e.target.closest('[data-near]'); if (b) openNearby(b.dataset.near); });
   function referralBox(r) {
@@ -346,6 +369,7 @@
   async function startApp() {
     me = await api('GET', '/api/patient/me');
     [kb] = await Promise.all([api('GET', '/api/patient/knowledge'), loadHistory().catch(() => {})]);
+    places = await api('GET', '/api/patient/places').catch(() => []);
     login.hidden = true; $('#bottom').hidden = false;
     renderProfile(); renderKnowledge(); resetChat(); await loadHistory(); buildDayOptions(); loadDay(); await loadNotifs();
     show(location.hash.slice(1)); showPopup();

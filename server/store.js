@@ -11,7 +11,7 @@ const DEFAULT_SYSTEM_PROMPT = 'คุณคือ "น้องหมอท้�
 
 function emptyDb() {
   return {
-    users: [], patients: [], assessments: [], messages: [], audit: [],
+    users: [], patients: [], assessments: [], messages: [], audit: [], places: [],
     settings: {
       openrouter: { keyEnc: '', model: 'openai/gpt-4o-mini', enabled: false, systemPrompt: DEFAULT_SYSTEM_PROMPT },
       his: { url: '', tokenEnc: '', enabled: false },

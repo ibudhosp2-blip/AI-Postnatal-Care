@@ -327,6 +327,24 @@ test('chat triage never overwrites a fuller assessment unless it is more severe'
   assert.strictEqual(w.data.level, 'red'); assert.ok(!w.data.kept);
   assert.strictEqual((await call(cj, 'GET', '/api/patient/assessments')).data.find(a => a.day === 5).level, 'red');
 });
+test('places: staff manages hospitals/TTM clinics (name, phone, GPS point); patients read; validation + permissions', async () => {
+  const stf = jar(); await call(stf, 'POST', '/api/auth/login', { username: 'admin2', password: 'admin1234' }, { 'cf-connecting-ip': '10.8.8.8' });
+  await call(stf, 'POST', '/api/auth/change-password', { current: 'admin1234', new: 'Staff-pass-5' });
+  const good = { kind: 'hospital', name: 'โรงพยาบาลตัวอย่าง', phone: '02-123-4567', address: 'ถ.ทดสอบ', lat: 13.7563, lng: 100.5018 };
+  const r = await call(stf, 'POST', '/api/staff/places', good); assert.strictEqual(r.status, 200); assert.strictEqual(r.data.lat, 13.7563);
+  const t = await call(stf, 'POST', '/api/staff/places', { kind: 'ttm', name: 'คลินิกแพทย์แผนไทยตัวอย่าง', phone: '081 234 5678', lat: '14.0', lng: '100.6' }); assert.strictEqual(t.status, 200); assert.strictEqual(t.data.lat, 14);
+  for (const bad of [{ ...good, kind: 'x' }, { ...good, name: 'ก' }, { ...good, phone: '<script>' }, { ...good, lat: '' }, { ...good, lat: 99 }, { ...good, lng: 'abc' }, { ...good, lat: null }])
+    assert.strictEqual((await call(stf, 'POST', '/api/staff/places', bad)).status, 400, JSON.stringify(bad));
+  assert.strictEqual((await call(stf, 'PUT', `/api/staff/places/${r.data.id}`, { ...good, phone: '02-999-9999' })).data.phone, '02-999-9999');
+  assert.strictEqual((await call(stf, 'PUT', '/api/staff/places/nope', good)).status, 404);
+  const pl = (await call(cj, 'GET', '/api/patient/places')).data;       // patient sees both, without internal fields
+  assert.strictEqual(pl.length, 2); assert.ok(!('by' in pl[0]) && !('at' in pl[0]));
+  assert.strictEqual((await call(cj, 'POST', '/api/staff/places', good)).status, 401);       // patient cannot write
+  assert.strictEqual((await call(jar(), 'GET', '/api/patient/places')).status, 401);
+  assert.strictEqual((await call(admin, 'GET', '/api/staff/places')).data.length, 2);         // admin1 can too
+  assert.strictEqual((await call(stf, 'DELETE', `/api/staff/places/${t.data.id}`)).status, 200);
+  assert.strictEqual((await call(cj, 'GET', '/api/patient/places')).data.length, 1);
+});
 test('seed: mock patients (10) added by admin1 once, accessible by HN with or without dash', async () => {
   const r = await call(admin, 'POST', '/api/admin/seed-mock', {}); assert.strictEqual(r.data.added, 9);       // 69-0005 already exists
   assert.strictEqual((await call(admin, 'POST', '/api/admin/seed-mock', {})).data.added, 0);

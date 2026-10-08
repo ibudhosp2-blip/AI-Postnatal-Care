@@ -421,6 +421,31 @@ async function createApp({ dataDir }) {
       messages: db.messages.filter(m => m.patientId === p.id).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30),
     };
   });
+  // ===== สถานพยาบาล (โรงพยาบาล / คลินิกแพทย์แผนไทย) — เจ้าหน้าที่ตั้งค่า, คนไข้อ่านเพื่อแสดง "ใกล้ฉัน" =====
+  function readPlace(b) {
+    const kind = b.kind; if (!['hospital', 'ttm'].includes(kind)) bad('เลือกประเภทสถานพยาบาล');
+    const name = str(b.name, 100); if (name.length < 2) bad('กรุณากรอกชื่อสถานพยาบาล');
+    const phone = str(b.phone, 25); if (phone && !/^[0-9+\-\s().,#]{3,25}$/.test(phone)) bad('เบอร์โทรไม่ถูกต้อง');
+    const lat = Number(b.lat), lng = Number(b.lng);
+    if (b.lat === '' || b.lat == null || b.lng === '' || b.lng == null || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) bad('กรุณาเลือกตำแหน่งบนแผนที่ (หรือกดใช้ GPS)');
+    return { kind, name, phone, address: str(b.address, 200), note: str(b.note, 200), lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
+  }
+  route('GET', '/api/staff/places', 'staff', () => db.places);
+  route('POST', '/api/staff/places', 'staff', (ctx) => {
+    if (db.places.length >= 500) bad('เพิ่มได้ไม่เกิน 500 แห่ง');
+    const pl = { id: crypto.randomUUID(), ...readPlace(ctx.body), by: ctx.user.username, at: new Date().toISOString() };
+    db.places.push(pl); S.save(); logAs(ctx, 'place-add', pl.name); return pl;
+  });
+  route('PUT', '/api/staff/places/:id', 'staff', (ctx) => {
+    const i = db.places.findIndex(x => x.id === ctx.params.id); if (i < 0) bad('ไม่พบสถานพยาบาล', 404);
+    db.places[i] = { ...db.places[i], ...readPlace(ctx.body), by: ctx.user.username, at: new Date().toISOString() }; S.save(); logAs(ctx, 'place-edit', db.places[i].name); return db.places[i];
+  });
+  route('DELETE', '/api/staff/places/:id', 'staff', (ctx) => {
+    const pl = db.places.find(x => x.id === ctx.params.id); if (!pl) bad('ไม่พบสถานพยาบาล', 404);
+    db.places = db.places.filter(x => x !== pl); S.save(); logAs(ctx, 'place-delete', pl.name); return { ok: true };
+  });
+  route('GET', '/api/patient/places', 'patient', () => db.places.map(({ id, kind, name, phone, address, note, lat, lng }) => ({ id, kind, name, phone, address, note, lat, lng })));
+
   route('POST', '/api/staff/line/send', 'staff', async (ctx) => {
     const p = patientById(ctx.body.patientId) || bad('ไม่พบคนไข้', 404);
     const text = str(ctx.body.text, 1000); if (!text) bad('กรุณาพิมพ์ข้อความ');

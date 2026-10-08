@@ -19,11 +19,22 @@
       <img class="logo" src="img/logo.png" alt="">
       <h1>หมอท้อง</h1>
       <p class="sub">AI Thai Postnatal Care</p>
+      <p id="ltest" class="testbanner" hidden>🧪 <b>โหมดทดสอบ</b> — ใส่ HN และชื่ออะไรก็ได้ ระบบจะจำลองผู้ป่วยให้</p>
       <form id="lform" autocomplete="off">
         <label>HN หรือ เบอร์โทรศัพท์<input name="id" required maxlength="30" autocapitalize="characters" autocomplete="off" inputmode="text"></label>
         <label>ชื่อของคุณ (บางส่วนก็ได้)<input name="namePart" required maxlength="60" autocomplete="off"></label>
         <button class="primary" id="lbtn">ถัดไป</button>
         <div id="lmsg" class="lmsg" role="alert"></div>
+      </form>
+      <form id="lprofile" class="lcam" hidden autocomplete="off">
+        <h2>วันที่คลอด</h2>
+        <p class="muted">วันที่คลอดคือ D0 ระบบจะคำนวณวันนี้เป็น Dxx ให้อัตโนมัติ</p>
+        <label>วันที่คลอด (D0)<input type="date" name="deliveryDate" required></label>
+        <label>ลักษณะการคลอด<select name="deliveryMode"><option value="vaginal">คลอดทางช่องคลอด (แจ้งเตือนฟื้นฟูเริ่ม D7)</option><option value="cesarean">ผ่าตัดคลอด (แจ้งเตือนฟื้นฟูเริ่ม D30)</option></select></label>
+        <div id="dpreview" class="dpreview"></div>
+        <button class="primary">เข้าสู่ระบบ</button>
+        <div id="lmsg3" class="lmsg" role="alert"></div>
+        <button class="link" id="lback2" type="button" style="margin:6px auto 0;display:block">ย้อนกลับ</button>
       </form>
       <div id="lstep2" class="lcam" hidden>
         <h2>สแกนใบหน้า</h2>
@@ -160,8 +171,12 @@
   <section class="view" id="v-herb">
     <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>สมุนไพรปลอดภัย</h2></div>
     <form id="herbform" class="card">
-      <label>ชื่อสมุนไพร/ผลิตภัณฑ์<input id="herbq" placeholder="เช่น ขิง, ขมิ้นชัน" list="herblist"></label>
-      <datalist id="herblist"></datalist>
+      <label id="herblabel">ค้นหา หรือเลือกจากรายการ (ยา · สมุนไพร · อาหารเสริม)</label>
+      <div class="combo" id="combo">
+        <input id="herbq" placeholder="พิมพ์ชื่อ เช่น ขิง, ขมิ้นชัน" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="herbopts" aria-labelledby="herblabel">
+        <button type="button" id="herbtoggle" aria-label="เปิดรายการ">▾</button>
+        <ul id="herbopts" role="listbox" hidden></ul>
+      </div>
       <fieldset><legend>ข้อมูลของคุณแม่</legend>
         <label class="ck"><input type="checkbox" name="breastfeeding" checked> ให้นมบุตร</label>
         <label class="ck"><input type="checkbox" name="hxPPH"> เคยตกเลือดหลังคลอด</label>

@@ -201,7 +201,8 @@ test('AI chat: red-flag text never reaches the LLM; normal question does, with k
   assert.ok(!c.body.messages.some(m => m.role === 'system' && m.content === 'ignore rules'));
   // disabled -> 503
   await call(admin, 'PUT', '/api/admin/settings', { openrouter: { enabled: false } });
-  assert.strictEqual((await call(p2, 'POST', '/api/patient/chat', { message: 'สระผมได้ไหม' })).status, 503);
+  const noAi = await call(p2, 'POST', '/api/patient/chat', { message: 'สระผมได้ไหม' });      // AI off → still answered from the knowledge base / FAQ
+  assert.strictEqual(noAi.status, 200); assert.ok(['kb', 'faq'].includes(noAi.data.source)); assert.ok(noAi.data.reply.includes('สระ')); assert.strictEqual(aiCalls.length, 1);
 });
 
 test('LINE OA: staff can send; fails clearly without userId or token', async () => {
@@ -318,6 +319,15 @@ test('assessment saves referral hint: red → hospital, ttm-only orange → ttm'
   assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 2, input: { engorgement: true, milk: 'low' } })).data.referral, 'ttm');
   assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 2, input: { tempC: 38.5 } })).data.referral, 'both');
 });
+test('liveness (blink) requirement is a setting the client learns at step 1', async () => {
+  const id = async () => (await call(jar(), 'POST', '/api/patient/identify', { id: 'HN010', namePart: 'มาลี' })).data;
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: false } });
+  assert.strictEqual((await id()).liveness, true); assert.strictEqual((await id()).mock, false);
+  await call(admin, 'PUT', '/api/admin/settings', { face: { liveness: false } });
+  assert.strictEqual((await id()).liveness, false);
+  assert.strictEqual((await call(admin, 'GET', '/api/admin/settings')).data.face.liveness, false);
+  await call(admin, 'PUT', '/api/admin/settings', { face: { liveness: true } });
+});
 test('chat triage never overwrites a fuller assessment unless it is more severe', async () => {
   await setClock('2026-11-06');
   await call(cj, 'POST', '/api/patient/assessment', { forDay: 5, input: { pain: 2, tempC: 36.7, sys: 110, dia: 70 } });
@@ -344,6 +354,55 @@ test('places: staff manages hospitals/TTM clinics (name, phone, GPS point); pati
   assert.strictEqual((await call(admin, 'GET', '/api/staff/places')).data.length, 2);         // admin1 can too
   assert.strictEqual((await call(stf, 'DELETE', `/api/staff/places/${t.data.id}`)).status, 200);
   assert.strictEqual((await call(cj, 'GET', '/api/patient/places')).data.length, 1);
+});
+test('chat: free text always gets an answer (kb → FAQ → hint); AI failure falls back to rules', async () => {
+  const q = async (m) => (await call(cj, 'POST', '/api/patient/chat', { message: m })).data;
+  assert.strictEqual((await q('ปวดหลังมากเลย')).source, 'faq');
+  assert.strictEqual((await q('วันนี้อากาศดีนะ')).source, 'none'); assert.ok((await q('วันนี้อากาศดีนะ')).suggest.length > 0);
+  assert.strictEqual((await q('เลือดออกมากเลย')).referral, true);
+  // AI on but upstream failing → rules answer, not an error
+  await call(admin, 'PUT', '/api/admin/settings', { openrouter: { apiKey: 'k', enabled: true } });
+  const saved = process.env.OPENROUTER_BASE_URL; process.env.OPENROUTER_BASE_URL = 'http://127.0.0.1:1';
+  const down = await call(cj, 'POST', '/api/patient/chat', { message: 'น้ำนมน้อยทำไงดี' });
+  process.env.OPENROUTER_BASE_URL = saved;
+  assert.strictEqual(down.status, 200); assert.strictEqual(down.data.source, 'faq');
+  await call(admin, 'PUT', '/api/admin/settings', { openrouter: { enabled: false } });
+});
+test('herbs carry a category (herb/medicine/supplement/food)', async () => {
+  const h = await call(admin, 'POST', '/api/admin/knowledge/herbs', { name: 'ยาพาราเซตามอล', category: 'medicine', baseline: 'consult' });
+  assert.strictEqual(h.data.category, 'medicine');
+  assert.strictEqual((await call(admin, 'POST', '/api/admin/knowledge/herbs', { name: 'อะไรสักอย่าง', category: 'bad' })).data.category, 'herb');
+});
+test('test-user mode: any HN/name → asked for delivery date → passes; D computed; surname auto-added; real patients unaffected', async () => {
+  await setClock('2026-11-20');
+  assert.strictEqual((await call(jar(), 'GET', '/api/public/config')).data.testMode, false);
+  assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: 'XYZ-999', namePart: 'ใครก็ได้' })).status, 401);   // off → normal rules
+  await call(admin, 'PUT', '/api/admin/settings', { testMode: { enabled: true } });
+  const cfg = (await call(jar(), 'GET', '/api/public/config')).data; assert.strictEqual(cfg.testMode, true); assert.strictEqual(cfg.today, '2026-11-20');
+  const t = jar();
+  const id = await call(t, 'POST', '/api/patient/identify', { id: 'ANY-123', namePart: 'สมใจ' }); assert.strictEqual(id.status, 200); assert.strictEqual(id.data.test, true);
+  assert.strictEqual((await call(t, 'POST', '/api/patient/login', {})).status, 409);                                   // must give delivery date first
+  assert.strictEqual((await call(t, 'POST', '/api/patient/test-profile', { deliveryDate: '2020-01-01', deliveryMode: 'vaginal' })).status, 400);   // too far back
+  assert.strictEqual((await call(t, 'POST', '/api/patient/test-profile', { deliveryDate: '2027-03-01' })).status, 400);                          // too far ahead
+  const prof = await call(t, 'POST', '/api/patient/test-profile', { deliveryDate: '2026-11-10', deliveryMode: 'cesarean' });
+  assert.strictEqual(prof.status, 200); assert.strictEqual(prof.data.days, 10); assert.ok(/^สมใจ .+/.test(prof.data.name), prof.data.name);       // surname appended
+  assert.strictEqual((await call(t, 'POST', '/api/patient/login', {})).status, 200);                                   // face step passes with no descriptor
+  const me = (await call(t, 'GET', '/api/patient/me')).data; assert.deepStrictEqual([me.hn, me.days, me.deliveryMode], ['ANY-123', 10, 'cesarean']);   // D0 = chosen date, today = D10
+  assert.strictEqual((await call(t, 'POST', '/api/patient/assessment', { input: { pain: 2 } })).data.day, 10);
+  await setClock('2026-11-21'); assert.strictEqual((await call(t, 'GET', '/api/patient/me')).data.days, 11);          // clock moves → D11
+  // a name that already has a surname is kept; whitespace/tags are cleaned
+  const t2 = jar(); await call(t2, 'POST', '/api/patient/identify', { id: '1', namePart: '<b>แอน บีม</b>' });
+  assert.strictEqual((await call(t2, 'POST', '/api/patient/test-profile', { deliveryDate: '2026-11-20', deliveryMode: 'vaginal' })).data.name, 'แอน บีม');
+  // isolation: test patients never appear in the real patient list, never block real HN/phone, cannot be used to log in as a real patient
+  const real = (await call(admin, 'GET', '/api/admin/patients')).data; assert.ok(!real.some(p => p.hn === 'ANY-123'));
+  assert.strictEqual((await call(admin, 'POST', '/api/admin/patients', { hn: 'ANY-123', name: 'คนจริง ทดสอบ', deliveryDate: '2026-11-01', deliveryMode: 'vaginal' })).status, 200);
+  const dash = (await call(admin, 'GET', '/api/staff/dashboard')).data.rows; assert.ok(dash.some(r => r.test && r.hn === 'ANY-123'));
+  const st = (await call(admin, 'GET', '/api/admin/settings')).data.testMode; assert.ok(st.enabled && st.count >= 2);
+  assert.strictEqual((await call(admin, 'DELETE', '/api/admin/test-patients')).data.removed, st.count);
+  assert.strictEqual((await call(t, 'GET', '/api/patient/me')).status, 401);                                           // their session dies with them
+  await call(admin, 'PUT', '/api/admin/settings', { testMode: { enabled: false } });
+  assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: 'NOPE', namePart: 'ผิด' })).status, 401);
+  await setClock('');
 });
 test('seed: mock patients (10) added by admin1 once, accessible by HN with or without dash', async () => {
   const r = await call(admin, 'POST', '/api/admin/seed-mock', {}); assert.strictEqual(r.data.added, 9);       // 69-0005 already exists

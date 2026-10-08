@@ -5,7 +5,7 @@
   "description": "หมอท้อง ; AI Thai Postnatal Care — prototype (zero dependencies)",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test tests/engine.test.js tests/server.test.js tests/liveness.test.js"
+    "test": "node --test tests/engine.test.js tests/server.test.js tests/liveness.test.js tests/chatbot.test.js"
   },
   "engines": { "node": ">=18" }
 }

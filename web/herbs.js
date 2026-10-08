@@ -3,20 +3,20 @@
  * ไม่พบในฐานข้อมูล → "ควรปรึกษาบุคลากร" เสมอ (fail-safe) */
 (function (root) {
   const DB = [
-    { name: 'ขิง', aliases: ['ginger', 'น้ำขิง', 'ขิงผง'], baseline: 'ok', note: 'ปริมาณระดับอาหาร',
+    { name: 'ขิง', category: 'food', aliases: ['ginger', 'น้ำขิง', 'ขิงผง'], baseline: 'ok', note: 'ปริมาณระดับอาหาร',
       consultIf: { anticoag: 'ใช้ยาต้านการแข็งตัวของเลือด', hxPPH: 'มีประวัติตกเลือด (ถ้าใช้ในรูปสกัด/ขนาดสูง)' } },
-    { name: 'ขมิ้นชัน', aliases: ['turmeric', 'curcumin', 'ขมิ้น'], baseline: 'ok', note: 'ระดับอาหาร; แคปซูลสกัดควรปรึกษา',
+    { name: 'ขมิ้นชัน', category: 'herb', aliases: ['turmeric', 'curcumin', 'ขมิ้น'], baseline: 'ok', note: 'ระดับอาหาร; แคปซูลสกัดควรปรึกษา',
       consultIf: { anticoag: 'ใช้ยาต้านการแข็งตัวของเลือด', hxPPH: 'มีประวัติตกเลือด', bleeding: 'มีเลือดออกผิดปกติ' } },
-    { name: 'หัวปลี', aliases: ['banana blossom'], baseline: 'ok', note: 'อาหารพื้นบ้านเพิ่มน้ำนม (หลักฐานจำกัด)', consultIf: {} },
-    { name: 'ใบแมงลัก', aliases: ['แมงลัก', 'hairy basil'], baseline: 'ok', note: 'ระดับอาหาร', consultIf: {} },
-    { name: 'กระเทียม', aliases: ['garlic'], baseline: 'ok', note: 'ระดับอาหาร; อาหารเสริมสกัดควรปรึกษา',
+    { name: 'หัวปลี', category: 'food', aliases: ['banana blossom'], baseline: 'ok', note: 'อาหารพื้นบ้านเพิ่มน้ำนม (หลักฐานจำกัด)', consultIf: {} },
+    { name: 'ใบแมงลัก', category: 'food', aliases: ['แมงลัก', 'hairy basil'], baseline: 'ok', note: 'ระดับอาหาร', consultIf: {} },
+    { name: 'กระเทียม', category: 'food', aliases: ['garlic'], baseline: 'ok', note: 'ระดับอาหาร; อาหารเสริมสกัดควรปรึกษา',
       consultIf: { anticoag: 'ใช้ยาต้านการแข็งตัวของเลือด' } },
-    { name: 'ฟ้าทะลายโจร', aliases: ['andrographis'], baseline: 'consult', note: 'ข้อมูลความปลอดภัยในมารดาให้นมบุตรจำกัด', consultIf: {} },
-    { name: 'ว่านชักมดลูก', aliases: ['kaempferia'], baseline: 'consult', note: 'ตำรับพื้นบ้านหลังคลอด',
+    { name: 'ฟ้าทะลายโจร', category: 'herb', aliases: ['andrographis'], baseline: 'consult', note: 'ข้อมูลความปลอดภัยในมารดาให้นมบุตรจำกัด', consultIf: {} },
+    { name: 'ว่านชักมดลูก', category: 'herb', aliases: ['kaempferia'], baseline: 'consult', note: 'ตำรับพื้นบ้านหลังคลอด',
       avoidIf: { hxPPH: 'มีประวัติตกเลือดหลังคลอด', bleeding: 'มีเลือดออกผิดปกติ' } },
-    { name: 'ยาขับน้ำคาวปลา', aliases: ['ตำรับขับน้ำคาวปลา', 'ยาหลังคลอด', 'ยาขับเลือด'], baseline: 'consult', note: 'ตำรับยาหลังคลอด ต้องตรวจส่วนประกอบรายผลิตภัณฑ์',
+    { name: 'ยาขับน้ำคาวปลา', category: 'medicine', aliases: ['ตำรับขับน้ำคาวปลา', 'ยาหลังคลอด', 'ยาขับเลือด'], baseline: 'consult', note: 'ตำรับยาหลังคลอด ต้องตรวจส่วนประกอบรายผลิตภัณฑ์',
       avoidIf: { hxPPH: 'ข้อห้ามใช้ในผู้มีภาวะตกเลือดหลังคลอด', bleeding: 'มีเลือดออกผิดปกติ' } },
-    { name: 'ชะเอมเทศ', aliases: ['licorice', 'ชะเอม'], baseline: 'consult', note: 'อาจทำให้ความดันสูงขึ้นเมื่อใช้ปริมาณมาก/ต่อเนื่อง',
+    { name: 'ชะเอมเทศ', category: 'herb', aliases: ['licorice', 'ชะเอม'], baseline: 'consult', note: 'อาจทำให้ความดันสูงขึ้นเมื่อใช้ปริมาณมาก/ต่อเนื่อง',
       avoidIf: { htn: 'ความดันโลหิตสูง' } },
   ];
 

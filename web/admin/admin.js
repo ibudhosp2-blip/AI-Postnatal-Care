@@ -69,15 +69,22 @@ Admin.boot('admin1', 'ผู้ดูแลระบบ (admin1) — เข้�
       <label>คำสั่งเพิ่มเติมให้ AI (system prompt)<textarea name="prompt" maxlength="4000">${esc(s.openrouter.systemPrompt)}</textarea></label>
       <p class="muted">ระบบเพิ่มกฎความปลอดภัยให้เสมอ (ห้ามวินิจฉัย/สั่งยา, ส่งต่อเมื่อพบสัญญาณอันตราย) และคำถามที่มี red flag จะไม่ถูกส่งไปที่ AI AI จะได้รับเฉพาะ จำนวนวันหลังคลอด ลักษณะการคลอด ระดับความเสี่ยง และฐานความรู้ ไม่ได้รับชื่อหรือ HN</p>
       <div class="row">${s.openrouter.hasKey ? '<button type="button" class="btn alt" id="ck">ลบ token</button>' : ''}</div>
+      <h3>ระบบผู้ใช้ทดสอบ</h3>
+      <label>โหมดผู้ใช้ทดสอบ<select name="testmode"><option value="0">ปิด — เข้าได้เฉพาะคนไข้ที่ลงทะเบียน</option><option value="1" ${s.testMode.enabled ? 'selected' : ''}>เปิด — HN/ชื่ออะไรก็ได้ แล้วเลือกวันที่คลอด</option></select></label>
+      ${s.testMode.enabled ? '<div class="msg err">โหมดผู้ใช้ทดสอบเปิดอยู่: <b>ใครก็เข้าได้</b> และคนไข้จริงจะเข้าด้วยวิธีปกติไม่ได้จนกว่าจะปิดโหมดนี้ ใช้เพื่อสาธิต/ทดสอบเท่านั้น</div>' : ''}
+      <p class="muted">เมื่อเปิด: กรอก HN และชื่ออะไรก็ได้ (ไม่มีนามสกุลระบบเติมให้) → ระบบถามวันที่คลอด (D0) → สแกนหน้าผ่านทุกคน → วันนี้เป็น Dxx อัตโนมัติ · ผู้ใช้ทดสอบเป็นข้อมูลชั่วคราว (ลบเองอัตโนมัติใน 24 ชม.) และจะไม่ปนกับรายชื่อคนไข้จริง · ขณะนี้มี <b>${s.testMode.count}</b> ราย</p>
+      ${s.testMode.count ? '<div class="row"><button type="button" class="btn alt sm" id="cleartest">ลบผู้ใช้ทดสอบทั้งหมด</button></div>' : ''}
       <h3>สแกนหน้า / โหมดสาธิต</h3>
       <label>โหมดสาธิต (mockup)<select name="mock"><option value="1" ${s.face.mockPass ? 'selected' : ''}>เปิด — สแกนหน้าผ่านทุกคน (ผ่านขั้น HN/เบอร์ + ชื่อแล้วเข้าได้)</option><option value="0" ${s.face.mockPass ? '' : 'selected'}>ปิด — เทียบใบหน้าจริง (ต้องลงทะเบียนใบหน้าก่อน)</option></select></label>
       ${s.face.mockPass ? '<div class="msg err">โหมดสาธิตเปิดอยู่: ใครรู้ HN/เบอร์โทร + ชื่อก็เข้าได้ ใช้กับข้อมูลสมมติเท่านั้น ห้ามใช้กับคนไข้จริง</div>' : ''}
       <h3>วันที่ของระบบ (สำหรับสาธิต)</h3>
       <label>วันที่สมมติ — เว้นว่าง = ใช้วันที่จริง (วันนี้ ${esc(s.demo.realToday)}) ใช้ทดสอบการนับ D และแจ้งเตือน D7/D30<input name="demo" type="date" value="${esc(s.demo.today)}"></label>
-      <h3>ยืนยันใบหน้า (เมื่อปิดโหมดสาธิต)</h3><label>ความเข้มงวด (0.30–0.60 ยิ่งต่ำยิ่งเข้มงวด, ค่าแนะนำ 0.50)<input name="th" type="number" step="0.01" min="0.3" max="0.6" value="${s.face.threshold}"></label>
+      <h3>ยืนยันใบหน้า (เมื่อปิดโหมดสาธิต)</h3>
+      <label>ตรวจกะพริบตาก่อนสแกน (กันการยกรูปถ่ายมาสแกน)<select name="live"><option value="1" ${s.face.liveness ? 'selected' : ''}>เปิด — ต้องกะพริบตา 1 ครั้ง</option><option value="0" ${s.face.liveness ? '' : 'selected'}>ปิด — แค่เจอใบหน้านิ่ง ๆ (ใช้เมื่ออุปกรณ์ตรวจกะพริบตาไม่ติด)</option></select></label><label>ความเข้มงวด (0.30–0.60 ยิ่งต่ำยิ่งเข้มงวด, ค่าแนะนำ 0.50)<input name="th" type="number" step="0.01" min="0.3" max="0.6" value="${s.face.threshold}"></label>
       <button class="btn">บันทึก</button><div id="m"></div></form></div>`;
     const f = $('#af');
-    f.onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/admin/settings', { openrouter: { apiKey: f.key.value, model: f.model.value.trim(), enabled: f.enabled.value === '1', systemPrompt: f.prompt.value }, face: { threshold: Number(f.th.value), mockPass: f.mock.value === '1' }, demo: { today: f.demo.value } }); await ai(); flash($('#m'), 'บันทึกแล้ว'); } catch (er) { flash($('#m'), er.message, false); } };
+    f.onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/admin/settings', { openrouter: { apiKey: f.key.value, model: f.model.value.trim(), enabled: f.enabled.value === '1', systemPrompt: f.prompt.value }, face: { threshold: Number(f.th.value), mockPass: f.mock.value === '1', liveness: f.live.value === '1' }, testMode: { enabled: f.testmode.value === '1' }, demo: { today: f.demo.value } }); await ai(); flash($('#m'), 'บันทึกแล้ว'); } catch (er) { flash($('#m'), er.message, false); } };
+    if ($('#cleartest')) $('#cleartest').onclick = async () => { if (confirm('ลบผู้ใช้ทดสอบทั้งหมด?')) { const r = await api('DELETE', '/api/admin/test-patients'); await ai(); flash($('#m'), `ลบแล้ว ${r.removed} ราย`); } };
     if ($('#ck')) $('#ck').onclick = async () => { await api('PUT', '/api/admin/settings', { openrouter: { clearKey: true, enabled: false } }); ai(); };
   }
 
@@ -89,7 +96,7 @@ Admin.boot('admin1', 'ผู้ดูแลระบบ (admin1) — เข้�
     const flagRows = (id) => Object.entries(FLAGS).map(([k, t]) => `<tr><td>${t}</td><td><select name="${id}-${k}"><option value="">—</option><option value="consult">ควรปรึกษา</option><option value="avoid">ไม่ควรใช้</option></select></td><td><input name="${id}-${k}-r" placeholder="เหตุผล"></td></tr>`).join('');
     $('#view').innerHTML =
       sec('herbs', 'สมุนไพร (ใช้ตรวจความปลอดภัย)', h => `<tr><td><b>${esc(h.name)}</b><br><span class="muted">${esc(h.note)}</span></td><td>${h.baseline === 'ok' ? 'ใช้ได้เบื้องต้น' : 'ควรปรึกษา'}</td><td class="muted">ปรึกษา: ${esc(Object.keys(h.consultIf).map(k => FLAGS[k]).join(', ') || '-')}<br>ห้าม: ${esc(Object.keys(h.avoidIf).map(k => FLAGS[k]).join(', ') || '-')}</td><td><button class="btn danger sm" data-del="herbs/${h.id}">ลบ</button></td></tr>`,
-        `<form data-kind="herbs"><div class="grid"><label>ชื่อ<input name="name" required></label><label>ชื่ออื่น (คั่นด้วย ,)<input name="aliases"></label><label>ค่าเริ่มต้น<select name="baseline"><option value="ok">ใช้ได้ (ระดับอาหาร)</option><option value="consult">ควรปรึกษา</option></select></label></div>
+        `<form data-kind="herbs"><div class="grid"><label>ชื่อ<input name="name" required></label><label>ประเภท<select name="category"><option value="herb">สมุนไพร</option><option value="medicine">ยา</option><option value="supplement">อาหารเสริม</option><option value="food">อาหาร</option></select></label><label>ชื่ออื่น (คั่นด้วย ,)<input name="aliases"></label><label>ค่าเริ่มต้น<select name="baseline"><option value="ok">ใช้ได้ (ระดับอาหาร)</option><option value="consult">ควรปรึกษา</option></select></label></div>
         <label>หมายเหตุ<input name="note" maxlength="300"></label><table>${flagRows('f')}</table><button class="btn" style="margin-top:8px">เพิ่มสมุนไพร</button></form>`) +
       sec('myths', 'โบราณเชื่อได้ไหม', m => `<tr><td><b>${esc(m.title)}</b><br><span class="muted">${esc(m.body.slice(0, 120))}</span></td><td>${VERD[m.verdict]}</td><td><button class="btn danger sm" data-del="myths/${m.id}">ลบ</button></td></tr>`,
         `<form data-kind="myths"><div class="grid"><label>เรื่อง/ความเชื่อ<input name="title" required></label><label>สรุป<select name="verdict"><option value="true">เชื่อได้</option><option value="false">เชื่อไม่ได้</option><option value="unclear">ไม่แน่ชัด</option></select></label></div><label>คำอธิบาย + หลักฐานอ้างอิง<textarea name="body" maxlength="2000"></textarea></label><button class="btn">เพิ่ม</button></form>`) +
@@ -100,7 +107,7 @@ Admin.boot('admin1', 'ผู้ดูแลระบบ (admin1) — เข้�
       ev.preventDefault(); const kind = f.dataset.kind, v = Object.fromEntries(new FormData(f));
       let body = v;
       if (kind === 'herbs') {
-        body = { name: v.name, aliases: (v.aliases || '').split(',').map(s => s.trim()).filter(Boolean), baseline: v.baseline, note: v.note, consultIf: {}, avoidIf: {} };
+        body = { name: v.name, category: v.category, aliases: (v.aliases || '').split(',').map(s => s.trim()).filter(Boolean), baseline: v.baseline, note: v.note, consultIf: {}, avoidIf: {} };
         for (const k of Object.keys(FLAGS)) { const t = v['f-' + k]; if (t === 'consult') body.consultIf[k] = v['f-' + k + '-r'] || FLAGS[k]; if (t === 'avoid') body.avoidIf[k] = v['f-' + k + '-r'] || FLAGS[k]; }
       }
       try { await api('POST', `/api/admin/knowledge/${kind}`, body); await content(); } catch (er) { flash($('#m'), er.message, false); }

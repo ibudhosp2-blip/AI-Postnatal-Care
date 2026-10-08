@@ -318,6 +318,15 @@ test('assessment saves referral hint: red → hospital, ttm-only orange → ttm'
   assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 2, input: { engorgement: true, milk: 'low' } })).data.referral, 'ttm');
   assert.strictEqual((await call(cj, 'POST', '/api/patient/assessment', { forDay: 2, input: { tempC: 38.5 } })).data.referral, 'both');
 });
+test('liveness (blink) requirement is a setting the client learns at step 1', async () => {
+  const id = async () => (await call(jar(), 'POST', '/api/patient/identify', { id: 'HN010', namePart: 'มาลี' })).data;
+  await call(admin, 'PUT', '/api/admin/settings', { face: { mockPass: false } });
+  assert.strictEqual((await id()).liveness, true); assert.strictEqual((await id()).mock, false);
+  await call(admin, 'PUT', '/api/admin/settings', { face: { liveness: false } });
+  assert.strictEqual((await id()).liveness, false);
+  assert.strictEqual((await call(admin, 'GET', '/api/admin/settings')).data.face.liveness, false);
+  await call(admin, 'PUT', '/api/admin/settings', { face: { liveness: true } });
+});
 test('chat triage never overwrites a fuller assessment unless it is more severe', async () => {
   await setClock('2026-11-06');
   await call(cj, 'POST', '/api/patient/assessment', { forDay: 5, input: { pain: 2, tempC: 36.7, sys: 110, dia: 70 } });

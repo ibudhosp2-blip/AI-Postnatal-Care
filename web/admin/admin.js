@@ -74,10 +74,11 @@ Admin.boot('admin1', 'ผู้ดูแลระบบ (admin1) — เข้�
       ${s.face.mockPass ? '<div class="msg err">โหมดสาธิตเปิดอยู่: ใครรู้ HN/เบอร์โทร + ชื่อก็เข้าได้ ใช้กับข้อมูลสมมติเท่านั้น ห้ามใช้กับคนไข้จริง</div>' : ''}
       <h3>วันที่ของระบบ (สำหรับสาธิต)</h3>
       <label>วันที่สมมติ — เว้นว่าง = ใช้วันที่จริง (วันนี้ ${esc(s.demo.realToday)}) ใช้ทดสอบการนับ D และแจ้งเตือน D7/D30<input name="demo" type="date" value="${esc(s.demo.today)}"></label>
-      <h3>ยืนยันใบหน้า (เมื่อปิดโหมดสาธิต)</h3><label>ความเข้มงวด (0.30–0.60 ยิ่งต่ำยิ่งเข้มงวด, ค่าแนะนำ 0.50)<input name="th" type="number" step="0.01" min="0.3" max="0.6" value="${s.face.threshold}"></label>
+      <h3>ยืนยันใบหน้า (เมื่อปิดโหมดสาธิต)</h3>
+      <label>ตรวจกะพริบตาก่อนสแกน (กันการยกรูปถ่ายมาสแกน)<select name="live"><option value="1" ${s.face.liveness ? 'selected' : ''}>เปิด — ต้องกะพริบตา 1 ครั้ง</option><option value="0" ${s.face.liveness ? '' : 'selected'}>ปิด — แค่เจอใบหน้านิ่ง ๆ (ใช้เมื่ออุปกรณ์ตรวจกะพริบตาไม่ติด)</option></select></label><label>ความเข้มงวด (0.30–0.60 ยิ่งต่ำยิ่งเข้มงวด, ค่าแนะนำ 0.50)<input name="th" type="number" step="0.01" min="0.3" max="0.6" value="${s.face.threshold}"></label>
       <button class="btn">บันทึก</button><div id="m"></div></form></div>`;
     const f = $('#af');
-    f.onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/admin/settings', { openrouter: { apiKey: f.key.value, model: f.model.value.trim(), enabled: f.enabled.value === '1', systemPrompt: f.prompt.value }, face: { threshold: Number(f.th.value), mockPass: f.mock.value === '1' }, demo: { today: f.demo.value } }); await ai(); flash($('#m'), 'บันทึกแล้ว'); } catch (er) { flash($('#m'), er.message, false); } };
+    f.onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/admin/settings', { openrouter: { apiKey: f.key.value, model: f.model.value.trim(), enabled: f.enabled.value === '1', systemPrompt: f.prompt.value }, face: { threshold: Number(f.th.value), mockPass: f.mock.value === '1', liveness: f.live.value === '1' }, demo: { today: f.demo.value } }); await ai(); flash($('#m'), 'บันทึกแล้ว'); } catch (er) { flash($('#m'), er.message, false); } };
     if ($('#ck')) $('#ck').onclick = async () => { await api('PUT', '/api/admin/settings', { openrouter: { clearKey: true, enabled: false } }); ai(); };
   }
 

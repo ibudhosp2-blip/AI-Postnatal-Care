@@ -136,7 +136,7 @@ async function createApp({ dataDir }) {
     sec.destroySession(cookies(ctx.req).pat_pre);
     const token = sec.createSession({ kind: 'patient-pre', patientId: p.id, fails: 0, key: k2 }, 5 * 60e3, false);
     setCookie(ctx.req, ctx.res, 'pat_pre', token, 5 * 60);
-    return { ok: true, hasFace: !!p.descriptor, mock: mockPass() };
+    return { ok: true, hasFace: !!p.descriptor, mock: mockPass(), liveness: db.settings.face.liveness !== false };
   });
   route('POST', '/api/patient/login', null, (ctx) => {
     const tok = cookies(ctx.req).pat_pre, pre = sec.getSession(tok);
@@ -266,7 +266,7 @@ async function createApp({ dataDir }) {
       openrouter: { hasKey: !!s.openrouter.keyEnc, model: s.openrouter.model, enabled: s.openrouter.enabled, systemPrompt: s.openrouter.systemPrompt },
       his: { url: s.his.url, hasToken: !!s.his.tokenEnc, enabled: s.his.enabled },
       line: { hasToken: !!s.line.tokenEnc },
-      face: { threshold: s.face.threshold, mockPass: s.face.mockPass !== false },
+      face: { threshold: s.face.threshold, mockPass: s.face.mockPass !== false, liveness: s.face.liveness !== false },
       demo: { today: (s.demo && s.demo.today) || '', realToday: bkkToday() },
     };
   };
@@ -293,6 +293,7 @@ async function createApp({ dataDir }) {
       if (b.line.clearToken === true) s.line.tokenEnc = '';
     }
     if (b.face && typeof b.face.mockPass === 'boolean') s.face.mockPass = b.face.mockPass;
+    if (b.face && typeof b.face.liveness === 'boolean') s.face.liveness = b.face.liveness;
     if (b.demo && b.demo.today !== undefined) { const t = str(b.demo.today, 10); if (t && !/^\d{4}-\d{2}-\d{2}$/.test(t)) bad('วันที่สมมติไม่ถูกต้อง'); s.demo = { today: t }; }
     if (b.face && b.face.threshold != null) { const t = Number(b.face.threshold); if (!(t >= 0.3 && t <= 0.6)) bad('ค่าความเข้มงวดต้องอยู่ระหว่าง 0.30–0.60'); s.face.threshold = t; }
     S.save(); logAs(ctx, 'settings-update'); return maskedSettings();

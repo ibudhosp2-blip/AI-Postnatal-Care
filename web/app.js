@@ -32,13 +32,13 @@
 
   // ---------- Login: step 1 (HN or phone + part of name) → step 2 (live face scan, no upload) ----------
   const login = $('#login'), lform = $('#lform');
-  let scanner = null, mockMode = false;
+  let scanner = null, mockMode = false, livenessOn = true;
   function showLogin(msg) { stopScan(); me = null; login.hidden = false; $('#bottom').hidden = true; $$('.view').forEach(v => v.classList.remove('on')); stepOne(msg); }
   function stopScan() { if (scanner) { scanner.cancel(); scanner = null; } }
   function stepOne(msg) { stopScan(); login.classList.remove('scanning'); lform.hidden = false; $('#lstep2').hidden = true; $('#lmsg').textContent = msg || ''; $('#lbtn').disabled = false; }
   async function stepTwo() {
     lform.hidden = true; login.classList.add('scanning'); $('#lstep2').hidden = false; $('#lmsg2').textContent = ''; $('#lretry').hidden = true;
-    stopScan(); scanner = mockMode ? PNCFace.mockScan($('#camwrap')) : PNCFace.liveScan($('#camwrap'), { liveness: true });
+    stopScan(); scanner = mockMode ? PNCFace.mockScan($('#camwrap')) : PNCFace.liveScan($('#camwrap'), { liveness: livenessOn, timeoutMs: 60000 });
     try {
       const r = await scanner.promise; scanner = null;
       await api('POST', '/api/patient/login', mockMode ? {} : { descriptor: r.descriptor });      // only the 128-number descriptor is sent (never an image)
@@ -52,7 +52,7 @@
   }
   lform.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg').textContent = ''; $('#lbtn').disabled = true;
-    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); mockMode = !!r.mock; await stepTwo(); }
+    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); mockMode = !!r.mock; livenessOn = r.liveness !== false; await stepTwo(); }
     catch (er) { $('#lmsg').textContent = er.message; } finally { $('#lbtn').disabled = false; }
   });
   $('#lretry').addEventListener('click', stepTwo);

@@ -41,11 +41,18 @@
     const st = document.createElement('style'); st.id = 'pnc-cam-style';
     st.textContent = `.pnc-cam{position:relative;width:100%;max-width:340px;aspect-ratio:3/4;margin:0 auto;border-radius:24px;overflow:hidden;background:#2a1a20;border:3px solid #f1d98a}
 .pnc-cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
-.pnc-cam .oval{position:absolute;inset:8% 14% 14%;border:3px dashed rgba(255,255,255,.85);border-radius:50%;box-shadow:0 0 0 999px rgba(42,26,32,.35);transition:border-color .2s}
-.pnc-cam.ok .oval{border-color:#4caf7a;border-style:solid}.pnc-cam.go .oval{border-color:#f0607a}
-.pnc-stat{text-align:center;font-weight:500;margin:10px 0 4px;min-height:1.6em}.pnc-stat.err{color:#d62b45}`;
+.pnc-cam .oval{position:absolute;inset:8% 14% 14%;border:3px dashed rgba(255,255,255,.85);border-radius:50%;box-shadow:0 0 0 999px rgba(42,26,32,.35);transition:border-color .25s}
+.pnc-cam.ok .oval{border-color:#f1d98a;border-style:solid}.pnc-cam.go .oval{border-color:#ff7e95;border-style:solid;animation:pncp 1s infinite}.pnc-cam.done .oval{border-color:#4caf7a;border-style:solid;border-width:5px}
+@keyframes pncp{50%{border-width:6px}}
+.pnc-stat{text-align:center;font-weight:500;margin:10px 0 4px;min-height:1.6em}.pnc-stat.err{color:#d62b45}
+.pnc-steps{display:flex;gap:6px;justify-content:center;margin:6px 0;font-size:.78rem;color:#8d7079;flex-wrap:wrap}
+.pnc-steps span{padding:2px 10px;border-radius:999px;background:#f7e6ea}.pnc-steps span.on{background:#ffd6de;color:#e0476a;font-weight:600}.pnc-steps span.ok{background:#d8f0e2;color:#2e7d4f;font-weight:600}
+.pnc-bar{height:6px;border-radius:3px;background:#f7e6ea;max-width:340px;margin:6px auto;overflow:hidden}.pnc-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ff7e95,#e0476a);transition:width .2s linear}
+.pnc-hint{text-align:center;color:#8d7079;font-size:.8rem;min-height:1.2em}`;
     document.head.appendChild(st);
   }
+  const STEPS = ['① พบใบหน้า', '② กะพริบตา', '③ ยืนยัน'];
+  const markup = (liveness) => `<div class="pnc-cam"><video playsinline muted autoplay></video><div class="oval"></div></div><div class="pnc-steps">${STEPS.filter((_, i) => liveness || i !== 1).map((t, i) => `<span data-s="${liveness ? i : (i ? 2 : 0)}">${liveness ? t : t.replace(/^[①②③]/, ['①', '②'][i])}</span>`).join('')}</div><div class="pnc-bar"><i></i></div><div class="pnc-stat" role="status" aria-live="polite">กำลังเปิดกล้อง...</div><div class="pnc-hint"></div>`;
   const cameraError = (e) => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'เบราว์เซอร์นี้ใช้กล้องไม่ได้ (ต้องเปิดผ่าน https หรือ localhost)';
     if (e && e.name === 'NotAllowedError') return 'ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณากดอนุญาตการเข้าถึงกล้องแล้วลองใหม่';
@@ -56,9 +63,11 @@
   // returns { promise, cancel }. Builds the camera UI inside `container`.
   function liveScan(container, { liveness = true, timeoutMs = 45000 } = {}) {
     injectStyle();
-    container.innerHTML = '<div class="pnc-cam"><video playsinline muted autoplay></video><div class="oval"></div></div><div class="pnc-stat" role="status" aria-live="polite">กำลังเปิดกล้อง...</div>';
-    const box = container.querySelector('.pnc-cam'), video = container.querySelector('video'), stat = container.querySelector('.pnc-stat');
+    container.innerHTML = markup(liveness);
+    const box = container.querySelector('.pnc-cam'), video = container.querySelector('video'), stat = container.querySelector('.pnc-stat'), hint = container.querySelector('.pnc-hint'), bar = container.querySelector('.pnc-bar i');
     const say = (t, cls = '') => { stat.textContent = t; stat.className = 'pnc-stat ' + cls; };
+    const step = (n) => container.querySelectorAll('.pnc-steps span').forEach(el => { const i = +el.dataset.s; el.className = i < n ? 'ok' : i === n ? 'on' : ''; });
+    step(0);
     let stopped = false, stream = null, finish;
     const cleanup = () => { stopped = true; if (stream) stream.getTracks().forEach(t => t.stop()); video.srcObject = null; };
     const promise = new Promise((resolve, reject) => {
@@ -73,14 +82,17 @@
         video.srcObject = stream; await video.play().catch(() => {});
         const opts = new f.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
         const det = window.PNC.liveness.createBlinkDetector();
-        const t0 = Date.now(); let steady = 0;
+        const t0 = Date.now(); let steady = 0, frames = 0;
         const ear = (lm) => (window.PNC.liveness.eyeAspectRatio(lm.getLeftEye()) + window.PNC.liveness.eyeAspectRatio(lm.getRightEye())) / 2;
         while (!stopped) {
-          if (Date.now() - t0 > timeoutMs) return finish.reject(new Error('หมดเวลาสแกน กรุณากดลองอีกครั้ง'));
+          const el = Date.now() - t0;
+          if (el > timeoutMs) return finish.reject(new Error('หมดเวลาสแกน กรุณากดลองอีกครั้ง (ลองให้แสงสว่างขึ้น ถอดแว่น และมองตรงที่กล้อง)'));
+          bar.style.width = Math.min(100, el / timeoutMs * 100) + '%';
+          frames++; if (el > 4000) { const fps = frames / (el / 1000); hint.textContent = fps < 3 ? 'เครื่องประมวลผลช้า — อยู่นิ่ง ๆ แล้วกะพริบตาช้า ๆ ให้ชัด' : (det.stage === 'closing' || det.stage === 'opening') && el > 12000 ? 'กะพริบตาช้า ๆ ให้ชัด 1 ครั้ง · ถอดแว่น/หลบแสงจ้าด้านหลัง' : ''; }
           if (video.readyState < 2 || !video.videoWidth) { await new Promise(r => setTimeout(r, 60)); continue; }
           const faces = await f.detectAllFaces(video, opts).withFaceLandmarks();
           if (stopped) return;
-          if (faces.length === 0) { steady = 0; box.className = 'pnc-cam'; say('ไม่พบใบหน้า — มองตรงที่กล้องและให้มีแสงเพียงพอ'); }
+          if (faces.length === 0) { steady = 0; box.className = 'pnc-cam'; step(0); say('ไม่พบใบหน้า — มองตรงที่กล้องและให้มีแสงเพียงพอ'); }
           else if (faces.length > 1) { steady = 0; box.className = 'pnc-cam'; say('พบหลายใบหน้า — ให้อยู่ในกรอบเฉพาะคุณ'); }
           else {
             const b = faces[0].detection.box, vw = video.videoWidth, vh = video.videoHeight;
@@ -92,16 +104,19 @@
               steady++; const e = ear(faces[0].landmarks);
               if (liveness) {
                 const stage = det.update(e);
-                if (stage === 'baseline') { box.className = 'pnc-cam ok'; say('มองตรงที่กล้อง...'); }
-                else if (stage === 'closing' || stage === 'opening') { box.className = 'pnc-cam go'; say('กะพริบตา 1 ครั้ง 👁'); }
-              } else { box.className = 'pnc-cam ok'; say('นิ่งไว้สักครู่...'); }
+                if (stage === 'baseline') { box.className = 'pnc-cam ok'; step(0); say('พบใบหน้าแล้ว — มองตรงที่กล้อง...'); }
+                else if (stage === 'closing' || stage === 'opening') { box.className = 'pnc-cam go'; step(1); say('กะพริบตา 1 ครั้ง 👁'); }
+              } else { box.className = 'pnc-cam ok'; step(0); say('พบใบหน้าแล้ว — นิ่งไว้สักครู่...'); }
               const live = liveness ? det.stage === 'done' && det.eyesOpen(e) : steady >= 4;
               if (live) {
-                say('กำลังยืนยันใบหน้า...');
+                step(2); say('กำลังยืนยันใบหน้า...');
                 const one = await f.detectSingleFace(video, opts).withFaceLandmarks().withFaceDescriptor();
                 if (stopped) return;
                 if (one && (!liveness || det.eyesOpen(ear(one.landmarks)))) {
-                  return finish.resolve({ descriptor: Array.from(one.descriptor), photo: frameToJpeg(video, vw, vh) });
+                  box.className = 'pnc-cam done'; bar.style.width = '100%'; container.querySelectorAll('.pnc-steps span').forEach(x => { x.className = 'ok'; }); say('✓ สแกนสำเร็จ');
+                  const out = { descriptor: Array.from(one.descriptor), photo: frameToJpeg(video, vw, vh) };
+                  await new Promise(r => setTimeout(r, 600));            // ให้เห็นสีเขียว/ติ๊กครบก่อนเข้าสู่ระบบ
+                  return finish.resolve(out);
                 }
               }
             }
@@ -113,20 +128,25 @@
     return { promise, cancel() { if (!stopped) { cleanup(); } } };
   }
   // ---- โหมดสาธิต (mockup): เปิดกล้อง + แสดงขั้นตอนสแกน แล้ว "ผ่าน" เสมอ — ไม่โหลดโมเดล ไม่ส่งภาพ ไม่ล้มเหลว ----
-  function mockScan(container, { ms = 2800 } = {}) {
+  function mockScan(container, { ms = 3600 } = {}) {
     injectStyle();
-    container.innerHTML = '<div class="pnc-cam"><video playsinline muted autoplay></video><div class="oval"></div></div><div class="pnc-stat" role="status" aria-live="polite">กำลังเปิดกล้อง...</div>';
-    const box = container.querySelector('.pnc-cam'), video = container.querySelector('video'), stat = container.querySelector('.pnc-stat');
+    container.innerHTML = markup(true);
+    const box = container.querySelector('.pnc-cam'), video = container.querySelector('video'), stat = container.querySelector('.pnc-stat'), bar = container.querySelector('.pnc-bar i');
+    const chips = [...container.querySelectorAll('.pnc-steps span')];
     let stream = null, dead = false, timers = [];
     const later = (fn, t) => timers.push(setTimeout(() => { if (!dead) fn(); }, t));
+    const mark = (n) => chips.forEach((el, i) => { el.className = i < n ? 'ok' : i === n ? 'on' : ''; });
     const cleanup = () => { dead = true; timers.forEach(clearTimeout); if (stream) stream.getTracks().forEach(t => t.stop()); video.srcObject = null; };
     const promise = new Promise((resolve) => {
       (async () => {
         let cam = true;
         try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false }); if (dead) { stream.getTracks().forEach(t => t.stop()); return; } video.srcObject = stream; await video.play().catch(() => {}); }
         catch { cam = false; }
-        box.className = 'pnc-cam go'; stat.textContent = cam ? 'กำลังสแกนใบหน้า...' : 'ไม่พบกล้อง — ข้ามการสแกน (โหมดสาธิต)';
-        later(() => { box.className = 'pnc-cam ok'; stat.textContent = '✓ สแกนผ่าน (โหมดสาธิต)'; }, ms * 0.7);
+        box.className = 'pnc-cam ok'; mark(0); stat.textContent = cam ? 'พบใบหน้า — กำลังสแกน...' : 'ไม่พบกล้อง — ข้ามการสแกน (โหมดสาธิต)';
+        bar.style.transitionDuration = ms + 'ms'; requestAnimationFrame(() => { bar.style.width = '100%'; });
+        later(() => { box.className = 'pnc-cam go'; mark(1); stat.textContent = 'ตรวจการเคลื่อนไหว...'; }, ms * 0.35);
+        later(() => { mark(2); stat.textContent = 'กำลังยืนยันใบหน้า...'; }, ms * 0.7);
+        later(() => { box.className = 'pnc-cam done'; chips.forEach(el => { el.className = 'ok'; }); stat.textContent = '✓ สแกนผ่าน (โหมดสาธิต)'; }, ms * 0.9);
         later(() => { cleanup(); resolve({ descriptor: null, photo: null, mock: true }); }, ms);
       })();
     });

@@ -49,6 +49,20 @@ function fullName(raw) {
   return `${n} ${SURNAMES[h % SURNAMES.length]}`;
 }
 
+// ---- build fingerprints: ใช้ตรวจว่าเบราว์เซอร์/เซิร์ฟเวอร์ใช้โค้ดเวอร์ชันเดียวกับไฟล์ปัจจุบันหรือไม่ ----
+function walk(dir, skip, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) { if (!skip(f)) walk(f, skip, out); } else if (/\.(js|css|html)$/.test(e.name)) out.push(f);
+  }
+  return out.sort();
+}
+function fingerprint(files) { const h = crypto.createHash('sha1'); for (const f of files) { h.update(f); h.update(fs.readFileSync(f)); } return h.digest('hex').slice(0, 8); }
+let fpCache = {};
+function cachedFp(key, compute) { const now = Date.now(); const c = fpCache[key]; if (c && now - c.t < 3000) return c.v; const v = compute(); fpCache[key] = { t: now, v }; return v; }
+const webBuild = () => cachedFp('web', () => fingerprint(walk(WEB, d => /[\\/]vendor$|[\\/]img$/.test(d))));
+const serverBuildNow = () => cachedFp('srv', () => fingerprint([...walk(path.join(__dirname), () => false), path.join(WEB, 'risk-engine.js')]));
+
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = (msg, status = 400) => { throw new HttpError(status, msg); };
 
@@ -80,10 +94,13 @@ function send(res, status, body, headers = {}) {
 async function createApp({ dataDir }) {
   const S = await storeLib.open(dataDir);
   const { db } = S;
+  const BOOT_SERVER_BUILD = serverBuildNow();      // รหัสโค้ดฝั่งเซิร์ฟเวอร์ ณ ตอนเริ่มทำงาน
   const todayStr = () => (db.settings.demo && db.settings.demo.today) || bkkToday();
   const daysSince = (d) => Math.floor((Date.parse(todayStr()) - Date.parse(d)) / 86400e3);     // D0 = วันคลอด, D1 = วันถัดไป
   const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && v >= '2000-01-01' && v <= addDays(todayStr(), 300);
   if (db.settings.face.mockPass === undefined) { db.settings.face.mockPass = process.env.FACE_MOCK !== '0'; S.save(); }
+  if (db.settings.face.scanEnabled === undefined) { db.settings.face.scanEnabled = process.env.FACE_SCAN === '1'; S.save(); }   // ค่าเริ่มต้น: ปิดการสแกนหน้า
+  const scanOn = () => db.settings.face.scanEnabled === true;
   const mockPass = () => db.settings.face.mockPass !== false;
   const testOn = () => !!(db.settings.testMode && db.settings.testMode.enabled);
   const TEST_TTL = 24 * 3600e3, TEST_CAP = 200;
@@ -151,7 +168,13 @@ async function createApp({ dataDir }) {
     const byHn = real.find(x => hnKey(x.hn) === t); if (byHn) return byHn;
     const ph = normPhone(ident); return ph ? real.find(x => x.phone === ph) || null : null;
   };
-  route('GET', '/api/public/config', null, () => ({ testMode: testOn(), today: todayStr() }));
+  function openSession(ctx, p) {
+    sec.destroySession(cookies(ctx.req).pat_pre); setCookie(ctx.req, ctx.res, 'pat_pre', '', 0);
+    const token = sec.createSession({ kind: 'patient', patientId: p.id }, 2 * 3600e3);
+    setCookie(ctx.req, ctx.res, 'pat_sid', token, 2 * 3600);
+    S.audit('patient:' + p.hn, 'login');
+  }
+  route('GET', '/api/public/config', null, () => ({ testMode: testOn(), today: todayStr(), scan: scanOn(), build: webBuild(), server: BOOT_SERVER_BUILD, serverDisk: serverBuildNow() }));
   route('POST', '/api/patient/identify', null, (ctx) => {
     if (testOn()) {          // โหมดผู้ใช้ทดสอบ: HN/ชื่ออะไรก็ได้ → ถามวันที่คลอดต่อ (ผ่านหมด)
       const ident = str(ctx.body.id, 30).replace(/[\u0000-\u001f<>]/g, ''), nm = str(ctx.body.namePart, 60);
@@ -167,6 +190,7 @@ async function createApp({ dataDir }) {
     if (sec.isBlocked(k1, 20) || sec.isBlocked(k2, 5)) bad('พยายามมากเกินไป กรุณารอ 15 นาทีหรือติดต่อเจ้าหน้าที่', 429);
     const p = findByIdent(ident);
     if (!p || namePart.length < 2 || !normName(p.name).includes(namePart)) { sec.hit(k1, 20, 15 * 60e3); sec.hit(k2, 5, 15 * 60e3); bad('ข้อมูลไม่ตรงกับระบบ กรุณาตรวจสอบ HN/เบอร์โทร และชื่ออีกครั้ง', 401); }
+    if (!scanOn()) { sec.clearKey(k2); openSession(ctx, p); return { ok: true, skipScan: true }; }       // สแกนหน้าปิดอยู่: HN/เบอร์ + ชื่อตรง → เข้าได้เลย
     sec.destroySession(cookies(ctx.req).pat_pre);
     const token = sec.createSession({ kind: 'patient-pre', patientId: p.id, fails: 0, key: k2 }, 5 * 60e3, false);
     setCookie(ctx.req, ctx.res, 'pat_pre', token, 5 * 60);
@@ -180,6 +204,7 @@ async function createApp({ dataDir }) {
     purgeTest();
     const p = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), test: true, hn: pre.test.hn, name: fullName(pre.test.name), deliveryDate: date, deliveryMode: mode, lineUserId: '', phone: '' };
     db.patients.push(p); S.save(); pre.patientId = p.id;
+    if (!scanOn()) { openSession(ctx, p); return { ok: true, name: p.name, days: daysSince(date), skipScan: true }; }
     return { ok: true, name: p.name, days: daysSince(date) };
   });
   route('POST', '/api/patient/login', null, (ctx) => {
@@ -313,7 +338,7 @@ async function createApp({ dataDir }) {
       openrouter: { hasKey: !!s.openrouter.keyEnc, model: s.openrouter.model, enabled: s.openrouter.enabled, systemPrompt: s.openrouter.systemPrompt },
       his: { url: s.his.url, hasToken: !!s.his.tokenEnc, enabled: s.his.enabled },
       line: { hasToken: !!s.line.tokenEnc },
-      face: { threshold: s.face.threshold, mockPass: s.face.mockPass !== false, liveness: s.face.liveness !== false },
+      face: { threshold: s.face.threshold, mockPass: s.face.mockPass !== false, liveness: s.face.liveness !== false, scanEnabled: s.face.scanEnabled === true },
       demo: { today: (s.demo && s.demo.today) || '', realToday: bkkToday() },
       testMode: { enabled: testOn(), count: db.patients.filter(p => p.test).length },
     };
@@ -342,6 +367,7 @@ async function createApp({ dataDir }) {
     }
     if (b.face && typeof b.face.mockPass === 'boolean') s.face.mockPass = b.face.mockPass;
     if (b.face && typeof b.face.liveness === 'boolean') s.face.liveness = b.face.liveness;
+    if (b.face && typeof b.face.scanEnabled === 'boolean') { s.face.scanEnabled = b.face.scanEnabled; logAs(ctx, 'face-scan', String(b.face.scanEnabled)); }
     if (b.testMode && typeof b.testMode.enabled === 'boolean') { s.testMode = { enabled: b.testMode.enabled }; logAs(ctx, 'test-mode', String(b.testMode.enabled)); }
     if (b.demo && b.demo.today !== undefined) { const t = str(b.demo.today, 10); if (t && !/^\d{4}-\d{2}-\d{2}$/.test(t)) bad('วันที่สมมติไม่ถูกต้อง'); s.demo = { today: t }; }
     if (b.face && b.face.threshold != null) { const t = Number(b.face.threshold); if (!(t >= 0.3 && t <= 0.6)) bad('ค่าความเข้มงวดต้องอยู่ระหว่าง 0.30–0.60'); s.face.threshold = t; }
@@ -573,9 +599,15 @@ async function createApp({ dataDir }) {
     fs.readFile(file, (err, buf) => {
       if (err) return send(res, 404, { error: 'not found' });
       const ext = path.extname(file).toLowerCase();
-      const immutable = rel.startsWith('/vendor/') || rel.startsWith('/img/');
+      const heavy = rel.startsWith('/vendor/') || rel.startsWith('/img/');
+      if (ext === '.html') {                       // ใส่รหัสเวอร์ชันต่อท้ายไฟล์ .js/.css ของแอป + meta build เพื่อกัน cache เก่า (เบราว์เซอร์/Cloudflare)
+        const v = webBuild();
+        buf = Buffer.from(buf.toString('utf8')
+          .replace(/(src|href)="([^"]+\.(?:js|css))"/g, (m, a, u) => (/^(https?:)?\/\//.test(u) || /vendor\//.test(u) ? m : `${a}="${u}?v=${v}"`))
+          .replace('<head>', `<head>\n<meta name="build" content="${v}">`));
+      }
       res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
-        'Cache-Control': immutable ? 'public, max-age=86400' : 'no-cache', 'Permissions-Policy': 'camera=(self), microphone=(self)' });
+        'Cache-Control': heavy ? 'public, max-age=86400' : 'no-store, max-age=0', 'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=(self)' });
       res.end(buf);
     });
   }

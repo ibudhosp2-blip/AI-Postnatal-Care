@@ -48,6 +48,16 @@
       if (u.mustChange) return changeView(u, true);
       start({ root, user: u, logout, changePassword: () => changeView(u, false), api, esc, flash, badge, fmt, THAI });
     }
+    // เวอร์ชัน: หน้านี้เก่ากว่าเซิร์ฟเวอร์ → รีโหลดหนึ่งครั้ง · โค้ดบนดิสก์ใหม่กว่าโปรเซสที่รันอยู่ → เตือนให้รีสตาร์ต
+    try {
+      const c = await (await fetch('/api/public/config', { cache: 'no-store' })).json();
+      const mine = (document.querySelector('meta[name=build]') || {}).content;
+      if (c.build && mine && c.build !== mine) { try { if (sessionStorage.getItem('pnc-reloaded') !== c.build) { sessionStorage.setItem('pnc-reloaded', c.build); location.reload(); return; } } catch (_) { location.reload(); return; } }
+      if (c.server && c.serverDisk && c.server !== c.serverDisk) {
+        const bar = document.createElement('div'); bar.style.cssText = 'background:#d62b45;color:#fff;padding:10px 16px;text-align:center;font-weight:600;position:sticky;top:0;z-index:99';
+        bar.textContent = '⚠ มีการอัปเดตโค้ดบนเซิร์ฟเวอร์ แต่ยังไม่ได้รีสตาร์ต — กด Ctrl+C ที่หน้าต่างที่รัน แล้วสั่ง npm start ใหม่ ไม่เช่นนั้นระบบจะทำงานผสมเวอร์ชันเก่า/ใหม่'; document.body.prepend(bar);
+      }
+    } catch (_) { /* offline */ }
     try { gate(await api('GET', '/api/auth/me')); } catch { loginView(); }
   }
   window.Admin = { boot, api, esc, flash, badge, fmt, $, THAI };

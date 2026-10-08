@@ -30,7 +30,7 @@ const daysAgo = (n) => new Date(Date.now() + 7 * 3600e3 - n * 86400e3).toISOStri
 test.before(async () => {
   fakeAI = http.createServer((req, res) => { let b = ''; req.on('data', c => b += c); req.on('end', () => { aiCalls.push({ auth: req.headers.authorization, body: JSON.parse(b) }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'ตอบจาก AI จำลอง' } }] })); }); }).listen(0);
   fakeLine = http.createServer((req, res) => { let b = ''; req.on('data', c => b += c); req.on('end', () => { lineCalls.push({ auth: req.headers.authorization, body: JSON.parse(b) }); res.statusCode = 200; res.end('{}'); }); }).listen(0);
-  process.env.SEED_MOCK = '0'; process.env.FACE_MOCK = '0';
+  process.env.SEED_MOCK = '0'; process.env.FACE_MOCK = '0'; process.env.FACE_SCAN = '1';
   process.env.OPENROUTER_BASE_URL = `http://127.0.0.1:${fakeAI.address().port}`;
   process.env.LINE_API_BASE = `http://127.0.0.1:${fakeLine.address().port}`;
   srv = await start({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mt-')), port: 0 });
@@ -232,6 +232,19 @@ test('admin1 can reset admin2 to default (forces change again)', async () => {
   const j = jar(); assert.strictEqual((await call(j, 'POST', '/api/auth/login', { username: 'admin2', password: 'admin1234' })).data.mustChange, true);
 });
 
+test('cache safety: app files are never cached, asset URLs carry the build id, config exposes it', async () => {
+  const html = await fetch(base + '/'); const text = await html.text();
+  assert.match(html.headers.get('cache-control'), /no-store/);
+  const cfg = (await call(jar(), 'GET', '/api/public/config')).data;
+  assert.match(cfg.build, /^[0-9a-f]{8}$/);
+  assert.ok(text.includes(`<meta name="build" content="${cfg.build}">`));
+  assert.ok(text.includes(`app.js?v=${cfg.build}`) && text.includes(`styles.css?v=${cfg.build}`));
+  assert.ok(!/vendor\/[^"]*\?v=/.test(text));                                                  // vendor files are not re-versioned
+  for (const f of ['app.js', 'styles.css']) { const r = await fetch(`${base}/${f}?v=${cfg.build}`); assert.strictEqual(r.status, 200); assert.match(r.headers.get('cache-control'), /no-store/); }
+  assert.match((await fetch(base + '/admin/')).headers.get('cache-control'), /no-store/);
+  assert.ok((await (await fetch(base + '/staff/')).text()).includes('common.js?v='));
+  assert.strictEqual(cfg.server, cfg.serverDisk);                                               // running code == code on disk
+});
 test('static: app served, data dir and dotfiles are not, traversal blocked', async () => {
   assert.strictEqual((await call(jar(), 'GET', '/')).status, 200);
   assert.strictEqual((await call(jar(), 'GET', '/admin/')).status, 200);
@@ -403,6 +416,31 @@ test('test-user mode: any HN/name → asked for delivery date → passes; D comp
   await call(admin, 'PUT', '/api/admin/settings', { testMode: { enabled: false } });
   assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: 'NOPE', namePart: 'ผิด' })).status, 401);
   await setClock('');
+});
+test('face scan can be cancelled: HN/phone + name logs in directly; wrong name still refused; test mode skips scan too', async () => {
+  const setScan = (on) => call(admin, 'PUT', '/api/admin/settings', { face: { scanEnabled: on } });
+  assert.strictEqual((await call(jar(), 'GET', '/api/public/config')).data.scan, true);
+  await setScan(false);
+  assert.strictEqual((await call(jar(), 'GET', '/api/public/config')).data.scan, false);
+  const j = jar(); const r = await call(j, 'POST', '/api/patient/identify', { id: 'HN010', namePart: 'มาลี' });
+  assert.strictEqual(r.status, 200); assert.strictEqual(r.data.skipScan, true);
+  assert.strictEqual((await call(j, 'GET', '/api/patient/me')).data.hn, 'HN010');                         // logged in with no face step
+  const jp = jar(); assert.strictEqual((await call(jp, 'POST', '/api/patient/identify', { id: '081-234-5678', namePart: 'สมหญิง' })).data.skipScan, true);   // phone works too
+  assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: 'HN010', namePart: 'ผิดชื่อ' })).status, 401);   // identity check remains
+  assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: 'ไม่มีจริง', namePart: 'มาลี' })).status, 401);
+  // test mode + scan off: date question then straight in
+  await call(admin, 'PUT', '/api/admin/settings', { testMode: { enabled: true } });
+  const t = jar(); assert.strictEqual((await call(t, 'POST', '/api/patient/identify', { id: 'T-1', namePart: 'ทดสอบ' })).data.test, true);
+  const prof = await call(t, 'POST', '/api/patient/test-profile', { deliveryDate: daysAgo(5), deliveryMode: 'vaginal' });
+  assert.strictEqual(prof.data.skipScan, true); assert.strictEqual((await call(t, 'GET', '/api/patient/me')).data.days, 5);
+  await call(admin, 'PUT', '/api/admin/settings', { testMode: { enabled: false } });
+  await call(admin, 'DELETE', '/api/admin/test-patients');
+  await setScan(true);
+  assert.strictEqual((await call(jar(), 'POST', '/api/patient/identify', { id: 'HN010', namePart: 'มาลี' })).data.skipScan, undefined);   // back to two-step
+});
+test('a fresh database ships with face scan OFF (opt-in)', async () => {
+  delete process.env.FACE_SCAN; const s3 = await start({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mt3-')), port: 0 });
+  try { const r = await fetch(`http://127.0.0.1:${s3.port}/api/public/config`); assert.strictEqual((await r.json()).scan, false); } finally { await s3.close(); process.env.FACE_SCAN = '1'; }
 });
 test('seed: mock patients (10) added by admin1 once, accessible by HN with or without dash', async () => {
   const r = await call(admin, 'POST', '/api/admin/seed-mock', {}); assert.strictEqual(r.data.added, 9);       // 69-0005 already exists

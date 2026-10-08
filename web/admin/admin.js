@@ -74,7 +74,10 @@ Admin.boot('admin1', 'ผู้ดูแลระบบ (admin1) — เข้�
       ${s.testMode.enabled ? '<div class="msg err">โหมดผู้ใช้ทดสอบเปิดอยู่: <b>ใครก็เข้าได้</b> และคนไข้จริงจะเข้าด้วยวิธีปกติไม่ได้จนกว่าจะปิดโหมดนี้ ใช้เพื่อสาธิต/ทดสอบเท่านั้น</div>' : ''}
       <p class="muted">เมื่อเปิด: กรอก HN และชื่ออะไรก็ได้ (ไม่มีนามสกุลระบบเติมให้) → ระบบถามวันที่คลอด (D0) → สแกนหน้าผ่านทุกคน → วันนี้เป็น Dxx อัตโนมัติ · ผู้ใช้ทดสอบเป็นข้อมูลชั่วคราว (ลบเองอัตโนมัติใน 24 ชม.) และจะไม่ปนกับรายชื่อคนไข้จริง · ขณะนี้มี <b>${s.testMode.count}</b> ราย</p>
       ${s.testMode.count ? '<div class="row"><button type="button" class="btn alt sm" id="cleartest">ลบผู้ใช้ทดสอบทั้งหมด</button></div>' : ''}
-      <h3>สแกนหน้า / โหมดสาธิต</h3>
+      <h3>สแกนหน้าตอนเข้าระบบ</h3>
+      <label>สแกนหน้า<select name="scan"><option value="0" ${s.face.scanEnabled ? '' : 'selected'}>ปิด — กรอก HN/เบอร์โทร + ชื่อ แล้วเข้าได้เลย</option><option value="1" ${s.face.scanEnabled ? 'selected' : ''}>เปิด — ต้องสแกนหน้าจากกล้องหลังกรอกข้อมูล</option></select></label>
+      ${s.face.scanEnabled ? '' : '<div class="msg err">สแกนหน้าปิดอยู่: ใครรู้ HN/เบอร์โทร + ชื่อก็เข้าได้ ควรเปิดสแกนหน้า (และปิดโหมดสาธิตด้านล่าง) ก่อนใช้กับคนไข้จริง</div>'}
+      <h3>สแกนหน้า / โหมดสาธิต <span class="muted">(มีผลเมื่อเปิดสแกนหน้า)</span></h3>
       <label>โหมดสาธิต (mockup)<select name="mock"><option value="1" ${s.face.mockPass ? 'selected' : ''}>เปิด — สแกนหน้าผ่านทุกคน (ผ่านขั้น HN/เบอร์ + ชื่อแล้วเข้าได้)</option><option value="0" ${s.face.mockPass ? '' : 'selected'}>ปิด — เทียบใบหน้าจริง (ต้องลงทะเบียนใบหน้าก่อน)</option></select></label>
       ${s.face.mockPass ? '<div class="msg err">โหมดสาธิตเปิดอยู่: ใครรู้ HN/เบอร์โทร + ชื่อก็เข้าได้ ใช้กับข้อมูลสมมติเท่านั้น ห้ามใช้กับคนไข้จริง</div>' : ''}
       <h3>วันที่ของระบบ (สำหรับสาธิต)</h3>
@@ -83,7 +86,7 @@ Admin.boot('admin1', 'ผู้ดูแลระบบ (admin1) — เข้�
       <label>ตรวจกะพริบตาก่อนสแกน (กันการยกรูปถ่ายมาสแกน)<select name="live"><option value="1" ${s.face.liveness ? 'selected' : ''}>เปิด — ต้องกะพริบตา 1 ครั้ง</option><option value="0" ${s.face.liveness ? '' : 'selected'}>ปิด — แค่เจอใบหน้านิ่ง ๆ (ใช้เมื่ออุปกรณ์ตรวจกะพริบตาไม่ติด)</option></select></label><label>ความเข้มงวด (0.30–0.60 ยิ่งต่ำยิ่งเข้มงวด, ค่าแนะนำ 0.50)<input name="th" type="number" step="0.01" min="0.3" max="0.6" value="${s.face.threshold}"></label>
       <button class="btn">บันทึก</button><div id="m"></div></form></div>`;
     const f = $('#af');
-    f.onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/admin/settings', { openrouter: { apiKey: f.key.value, model: f.model.value.trim(), enabled: f.enabled.value === '1', systemPrompt: f.prompt.value }, face: { threshold: Number(f.th.value), mockPass: f.mock.value === '1', liveness: f.live.value === '1' }, testMode: { enabled: f.testmode.value === '1' }, demo: { today: f.demo.value } }); await ai(); flash($('#m'), 'บันทึกแล้ว'); } catch (er) { flash($('#m'), er.message, false); } };
+    f.onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/admin/settings', { openrouter: { apiKey: f.key.value, model: f.model.value.trim(), enabled: f.enabled.value === '1', systemPrompt: f.prompt.value }, face: { threshold: Number(f.th.value), mockPass: f.mock.value === '1', liveness: f.live.value === '1', scanEnabled: f.scan.value === '1' }, testMode: { enabled: f.testmode.value === '1' }, demo: { today: f.demo.value } }); await ai(); flash($('#m'), 'บันทึกแล้ว'); } catch (er) { flash($('#m'), er.message, false); } };
     if ($('#cleartest')) $('#cleartest').onclick = async () => { if (confirm('ลบผู้ใช้ทดสอบทั้งหมด?')) { const r = await api('DELETE', '/api/admin/test-patients'); await ai(); flash($('#m'), `ลบแล้ว ${r.removed} ราย`); } };
     if ($('#ck')) $('#ck').onclick = async () => { await api('PUT', '/api/admin/settings', { openrouter: { clearKey: true, enabled: false } }); ai(); };
   }

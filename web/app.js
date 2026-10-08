@@ -70,13 +70,14 @@
   lprof.deliveryDate.addEventListener('input', previewD);
   lprof.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg3').textContent = '';
-    try { await api('POST', '/api/patient/test-profile', { deliveryDate: lprof.deliveryDate.value, deliveryMode: lprof.deliveryMode.value }); lprof.hidden = true; mockMode = true; await stepTwo(); }
+    try { const r = await api('POST', '/api/patient/test-profile', { deliveryDate: lprof.deliveryDate.value, deliveryMode: lprof.deliveryMode.value }); lprof.hidden = true; if (r.skipScan) { lform.reset(); return await startApp(); } mockMode = true; await stepTwo(); }
     catch (er) { if (er.status === 401) return stepOne(er.message); $('#lmsg3').textContent = er.message; }
   });
   $('#lback2').addEventListener('click', () => stepOne());
   lform.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg').textContent = ''; $('#lbtn').disabled = true;
-    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); mockMode = !!r.mock; livenessOn = r.liveness !== false; if (r.test) return stepProfile(); await stepTwo(); }
+    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); if (r.skipScan) { lform.reset(); return await startApp(); }
+      mockMode = !!r.mock; livenessOn = r.liveness !== false; if (r.test) return stepProfile(); await stepTwo(); }
     catch (er) { $('#lmsg').textContent = er.message; } finally { $('#lbtn').disabled = false; }
   });
   $('#lretry').addEventListener('click', stepTwo);

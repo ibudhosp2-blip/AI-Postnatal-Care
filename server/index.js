@@ -9,6 +9,7 @@ const sec = require('./security');
 const storeLib = require('./store');
 const risk = require('../web/risk-engine.js');
 const chatbot = require('./chatbot');
+const nearbyLib = require('./nearby');
 
 const WEB = path.join(__dirname, '..', 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.bin': 'application/octet-stream', '.ico': 'image/x-icon' };
@@ -27,6 +28,7 @@ const SAFETY_PROMPT = [
 const bkkToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 const addDays = (d, n) => new Date(Date.parse(d) + n * 86400e3).toISOString().slice(0, 10);
 const hnKey = (s) => String(s || '').toLowerCase().replace(/[\s._-]/g, '');   // "69-0005" ≡ "690005"
+const NUMERIC_ID = /^[0-9][0-9-]{0,29}$/;     // HN / เบอร์โทร: เลขเท่านั้น (อนุญาต - เช่น 69-0005)
 const COVERAGE = ['เบิกได้', 'ประกันสังคม', 'บัตรทอง', 'ชำระเงินเอง', 'อื่นๆ'];
 const MOCK_PATIENTS = [   // mockup data (ไม่ใช่คนไข้จริง) — วันที่คลอดตามตาราง mockup (พ.ศ. 2569 = ค.ศ. 2026)
   ['มะลิ พุทธา', 17, 36, '690001', 'เบิกได้', 'vaginal', '2026-10-08'], ['กุหลาบ พุทธา', 21, 37, '690002', 'เบิกได้', 'cesarean', '2026-10-08'],
@@ -62,6 +64,12 @@ let fpCache = {};
 function cachedFp(key, compute) { const now = Date.now(); const c = fpCache[key]; if (c && now - c.t < 3000) return c.v; const v = compute(); fpCache[key] = { t: now, v }; return v; }
 const webBuild = () => cachedFp('web', () => fingerprint(walk(WEB, d => /[\\/]vendor$|[\\/]img$/.test(d))));
 const serverBuildNow = () => cachedFp('srv', () => fingerprint([...walk(path.join(__dirname), () => false), path.join(WEB, 'risk-engine.js')]));
+
+// ข้อมูลจำลองอัตโนมัติสำหรับผู้ใช้ทดสอบ: อายุ / อายุครรภ์ / สิทธิ์ (คงที่ตามชื่อ+HN)
+function mockDemographics(seed) {
+  let h = 0; for (const ch of String(seed)) h = (h * 33 + ch.codePointAt(0)) >>> 0;
+  return { age: 18 + (h % 25), gestationalWeeks: 36 + ((h >>> 3) % 5), coverage: ['เบิกได้', 'ประกันสังคม', 'บัตรทอง'][(h >>> 7) % 3] };
+}
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = (msg, status = 400) => { throw new HttpError(status, msg); };
@@ -103,6 +111,9 @@ async function createApp({ dataDir }) {
   const scanOn = () => db.settings.face.scanEnabled === true;
   const mockPass = () => db.settings.face.mockPass !== false;
   const testOn = () => !!(db.settings.testMode && db.settings.testMode.enabled);
+  // ช่วงที่ยังอยู่โรงพยาบาลหลังคลอด: คลอดปกติ 48 ชม. / ผ่าคลอด 72 ชม. (แก้ได้ที่ admin1) → ถ้าผลเป็นส้ม/แดงในช่วงนี้ให้แจ้งพยาบาลในแผนก
+  const inpatientDays = (p) => { const i = db.settings.inpatient || { vaginalHours: 48, cesareanHours: 72 }; return Math.floor((p.deliveryMode === 'cesarean' ? i.cesareanHours : i.vaginalHours) / 24); };
+  const inHospital = (p) => { const D = daysSince(p.deliveryDate); return D >= 0 && D <= inpatientDays(p); };
   const TEST_TTL = 24 * 3600e3, TEST_CAP = 200;
   function purgeTest(force = false) {       // ผู้ใช้ทดสอบเป็นข้อมูลชั่วคราว: เก็บ 24 ชม. / ไม่เกิน 200 ราย
     const now = Date.now(); let tests = db.patients.filter(p => p.test);
@@ -176,8 +187,10 @@ async function createApp({ dataDir }) {
   }
   route('GET', '/api/public/config', null, () => ({ testMode: testOn(), today: todayStr(), scan: scanOn(), build: webBuild(), server: BOOT_SERVER_BUILD, serverDisk: serverBuildNow() }));
   route('POST', '/api/patient/identify', null, (ctx) => {
-    if (testOn()) {          // โหมดผู้ใช้ทดสอบ: HN/ชื่ออะไรก็ได้ → ถามวันที่คลอดต่อ (ผ่านหมด)
-      const ident = str(ctx.body.id, 30).replace(/[\u0000-\u001f<>]/g, ''), nm = str(ctx.body.namePart, 60);
+    const rawId = str(ctx.body.id, 30);
+    if (!NUMERIC_ID.test(rawId)) bad('HN หรือเบอร์โทรศัพท์ ใส่ได้เฉพาะตัวเลข');
+    if (testOn()) {          // โหมดผู้ใช้ทดสอบ: HN/ชื่ออะไรก็ได้ (เลข) → ถามวันที่คลอดต่อ (ผ่านหมด)
+      const ident = rawId, nm = str(ctx.body.namePart, 60);
       if (!ident || !nm) bad('กรุณากรอก HN/เบอร์โทร และชื่อ');
       if (sec.hit(`tcreate:${ctx.ip}`, 60, 3600e3).blocked) bad('ทดสอบถี่เกินไป กรุณารอสักครู่', 429);
       sec.destroySession(cookies(ctx.req).pat_pre);
@@ -200,9 +213,10 @@ async function createApp({ dataDir }) {
     const pre = sec.getSession(cookies(ctx.req).pat_pre);
     if (!testOn() || !pre || pre.kind !== 'patient-pre' || !pre.test) bad('หมดเวลา กรุณากรอก HN และชื่อใหม่อีกครั้ง', 401);
     const date = ctx.body.deliveryDate, mode = ctx.body.deliveryMode === 'cesarean' ? 'cesarean' : 'vaginal';
-    if (!isDate(date) || date < addDays(todayStr(), -180) || date > addDays(todayStr(), 30)) bad('เลือกวันที่คลอดย้อนหลังได้ไม่เกิน 180 วัน และล่วงหน้าไม่เกิน 30 วัน');
+    if (!isDate(date) || date > todayStr()) bad('วันที่คลอดต้องเป็นวันนี้หรือวันก่อนหน้า (เลือกวันที่ยังไม่ถึงไม่ได้)');
+    if (date < addDays(todayStr(), -180)) bad('เลือกวันที่คลอดย้อนหลังได้ไม่เกิน 180 วัน');
     purgeTest();
-    const p = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), test: true, hn: pre.test.hn, name: fullName(pre.test.name), deliveryDate: date, deliveryMode: mode, lineUserId: '', phone: '' };
+    const p = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), test: true, hn: pre.test.hn, name: fullName(pre.test.name), deliveryDate: date, deliveryMode: mode, lineUserId: '', phone: '', ...mockDemographics(pre.test.name + pre.test.hn) };
     db.patients.push(p); S.save(); pre.patientId = p.id;
     if (!scanOn()) { openSession(ctx, p); return { ok: true, name: p.name, days: daysSince(date), skipScan: true }; }
     return { ok: true, name: p.name, days: daysSince(date) };
@@ -232,7 +246,7 @@ async function createApp({ dataDir }) {
   route('POST', '/api/patient/logout', null, (ctx) => { sec.destroySession(cookies(ctx.req).pat_sid); setCookie(ctx.req, ctx.res, 'pat_sid', '', 0); return { ok: true }; });
   route('GET', '/api/patient/me', 'patient', (ctx) => {
     const p = ctx.patient;
-    return { hn: p.hn, name: p.name, deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, days: daysSince(p.deliveryDate), age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '', today: todayStr() };
+    return { hn: p.hn, name: p.name, deliveryDate: p.deliveryDate, deliveryMode: p.deliveryMode, days: daysSince(p.deliveryDate), age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '', today: todayStr(), inHospital: inHospital(p), inpatientDays: inpatientDays(p), test: !!p.test };
   });
 
   const num = (v, lo, hi) => { if (v === '' || v == null) return null; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) bad('ค่าที่กรอกไม่อยู่ในช่วงที่เป็นไปได้'); return n; };
@@ -247,6 +261,7 @@ async function createApp({ dataDir }) {
       bleeding: ['normal', 'clots', 'heavy'].includes(b.bleeding) ? b.bleeding : 'normal',
       milk: ['enough', 'low', 'none'].includes(b.milk) ? b.milk : 'enough',
       tempC: num(b.tempC, 30, 45), pain: num(b.pain, 0, 10), sys: num(b.sys, 50, 260), dia: num(b.dia, 30, 160), epds: num(b.epds, 0, 30), sleepHours: num(b.sleepHours, 0, 24),
+      stress: ['none', 'mild', 'high', 'suicidal'].includes(b.stress) ? b.stress : null,
     };
     for (const k of BOOLS) input[k] = b[k] === true;
     const r = risk.assess(input);
@@ -298,10 +313,12 @@ async function createApp({ dataDir }) {
     if (!message) bad('กรุณาพิมพ์ข้อความ');
     if (sec.hit(`chatq:${ctx.patient.id}`, 200, 3600e3).blocked) bad('ถามถี่เกินไป กรุณารอสักครู่', 429);
     const latest = latestOf(ctx.patient.id);
-    if (RED_FLAG_TEXT.test(message)) return { reply: REFERRAL, referral: true, source: 'referral' };      // rule-based first: never let the LLM handle red flags
+    const inHosp = inHospital(ctx.patient);
+    const REF = inHosp ? 'สิ่งที่เล่ามาอาจเป็นสัญญาณอันตราย ตอนนี้ยังอยู่ในโรงพยาบาล — กรุณาแจ้งพยาบาลในแผนกทันที' : REFERRAL;
+    if (RED_FLAG_TEXT.test(message)) return { reply: REF, referral: true, inHospital: inHosp, source: 'referral' };      // rule-based first: never let the LLM handle red flags
     const recentRed = latest && latest.level === 'red' && Date.now() - Date.parse(latest.at) < 48 * 3600e3;
-    const notice = recentRed ? REFERRAL + '\n\n' : '';
-    const rules = () => { const r = chatbot.answer(message, db.knowledge); return { ...r, reply: notice + r.reply, ...(recentRed ? { referral: true } : {}) }; };
+    const notice = recentRed ? REF + '\n\n' : '';
+    const rules = () => { const r = chatbot.answer(message, db.knowledge); return { ...r, reply: notice + r.reply, ...(recentRed ? { referral: true, inHospital: inHosp } : {}) }; };
     const o = db.settings.openrouter;
     if (recentRed || !o.enabled || !o.keyEnc) return rules();                                          // no AI configured (or recent red result) → knowledge base + built-in FAQ
     if (sec.hit(`chat:${ctx.patient.id}`, 20, 3600e3).blocked) return rules();                         // AI quota used → still answer from rules
@@ -341,6 +358,7 @@ async function createApp({ dataDir }) {
       face: { threshold: s.face.threshold, mockPass: s.face.mockPass !== false, liveness: s.face.liveness !== false, scanEnabled: s.face.scanEnabled === true },
       demo: { today: (s.demo && s.demo.today) || '', realToday: bkkToday() },
       testMode: { enabled: testOn(), count: db.patients.filter(p => p.test).length },
+      inpatient: { vaginalHours: (s.inpatient || {}).vaginalHours ?? 48, cesareanHours: (s.inpatient || {}).cesareanHours ?? 72 },
     };
   };
   route('GET', '/api/admin/settings', 'admin1', () => maskedSettings());
@@ -369,6 +387,7 @@ async function createApp({ dataDir }) {
     if (b.face && typeof b.face.liveness === 'boolean') s.face.liveness = b.face.liveness;
     if (b.face && typeof b.face.scanEnabled === 'boolean') { s.face.scanEnabled = b.face.scanEnabled; logAs(ctx, 'face-scan', String(b.face.scanEnabled)); }
     if (b.testMode && typeof b.testMode.enabled === 'boolean') { s.testMode = { enabled: b.testMode.enabled }; logAs(ctx, 'test-mode', String(b.testMode.enabled)); }
+    if (b.inpatient) { const v = Number(b.inpatient.vaginalHours), c = Number(b.inpatient.cesareanHours); if (!(v >= 0 && v <= 240 && c >= 0 && c <= 240)) bad('ชั่วโมงที่อยู่โรงพยาบาลต้องอยู่ระหว่าง 0–240'); s.inpatient = { vaginalHours: Math.round(v), cesareanHours: Math.round(c) }; }
     if (b.demo && b.demo.today !== undefined) { const t = str(b.demo.today, 10); if (t && !/^\d{4}-\d{2}-\d{2}$/.test(t)) bad('วันที่สมมติไม่ถูกต้อง'); s.demo = { today: t }; }
     if (b.face && b.face.threshold != null) { const t = Number(b.face.threshold); if (!(t >= 0.3 && t <= 0.6)) bad('ค่าความเข้มงวดต้องอยู่ระหว่าง 0.30–0.60'); s.face.threshold = t; }
     S.save(); logAs(ctx, 'settings-update'); return maskedSettings();
@@ -384,7 +403,7 @@ async function createApp({ dataDir }) {
   }
   function readDescriptor(d) { if (!Array.isArray(d) || d.length !== 128 || !d.every(n => Number.isFinite(n) && Math.abs(n) < 5)) bad('ข้อมูลใบหน้าไม่ถูกต้อง'); return d; }
   function applyPatient(p, b, isNew) {
-    if (isNew || b.hn !== undefined) { const hn = str(b.hn, 20); if (!/^[A-Za-z0-9._-]{1,20}$/.test(hn)) bad('HN ใช้ได้เฉพาะตัวอักษร/ตัวเลข . _ - (ไม่เกิน 20 ตัว)'); if (db.patients.some(x => !x.test && x.id !== p.id && hnKey(x.hn) === hnKey(hn))) bad('HN นี้มีอยู่แล้ว (ไม่นับเครื่องหมาย -)', 409); p.hn = hn; }
+    if (isNew || b.hn !== undefined) { const hn = str(b.hn, 20); if (!/^[0-9][0-9-]{0,19}$/.test(hn)) bad('HN ใส่ได้เฉพาะตัวเลข (และ -) ไม่เกิน 20 ตัว'); if (db.patients.some(x => !x.test && x.id !== p.id && hnKey(x.hn) === hnKey(hn))) bad('HN นี้มีอยู่แล้ว (ไม่นับเครื่องหมาย -)', 409); p.hn = hn; }
     if (isNew || b.name !== undefined) { const n = str(b.name, 100); if (n.length < 2) bad('กรุณากรอกชื่อคนไข้'); p.name = n; }
     if (isNew || b.deliveryDate !== undefined) { if (!isDate(b.deliveryDate)) bad('วันที่คลอดไม่ถูกต้อง'); p.deliveryDate = b.deliveryDate; }
     if (isNew || b.deliveryMode !== undefined) { if (!['vaginal', 'cesarean'].includes(b.deliveryMode)) bad('ลักษณะการคลอดไม่ถูกต้อง'); p.deliveryMode = b.deliveryMode; }
@@ -482,7 +501,7 @@ async function createApp({ dataDir }) {
       const done = new Set(db.assessments.filter(x => x.patientId === p.id).map(x => x.day));
       let missed = 0; for (let d = 1; d <= D; d++) if (!done.has(d)) missed++;
       return { id: p.id, test: !!p.test, hn: p.hn, name: p.name, days: D, deliveryMode: p.deliveryMode, age: p.age ?? null, gestationalWeeks: p.gestationalWeeks ?? null, coverage: p.coverage || '', hasLine: !!p.lineUserId,
-        level: a ? a.level : 'none', reasons: a ? a.reasons : [], assessedAt: a ? a.at : null, referral: a ? a.referral || null : null, missed };
+        level: a ? a.level : 'none', reasons: a ? a.reasons : [], assessedAt: a ? a.at : null, referral: a ? a.referral || null : null, missed, inHospital: inHospital(p) };
     });
     const rank = { red: 0, orange: 1, yellow: 2, green: 3, none: 4 };
     rows.sort((x, y) => rank[x.level] - rank[y.level] || (y.assessedAt || '').localeCompare(x.assessedAt || '') || x.hn.localeCompare(y.hn));
@@ -519,6 +538,13 @@ async function createApp({ dataDir }) {
   route('DELETE', '/api/staff/places/:id', 'staff', (ctx) => {
     const pl = db.places.find(x => x.id === ctx.params.id); if (!pl) bad('ไม่พบสถานพยาบาล', 404);
     db.places = db.places.filter(x => x !== pl); S.save(); logAs(ctx, 'place-delete', pl.name); return { ok: true };
+  });
+  route('GET', '/api/patient/nearby', 'patient', async (ctx) => {
+    const kind = ctx.query.get('kind'), lat = Number(ctx.query.get('lat')), lng = Number(ctx.query.get('lng'));
+    if (!ctx.query.has('lat') || !ctx.query.has('lng') || !['hospital', 'ttm'].includes(kind) || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) bad('พิกัดไม่ถูกต้อง');
+    if (sec.hit(`nearby:${ctx.patient.id}`, 40, 3600e3).blocked) bad('ค้นหาถี่เกินไป กรุณารอสักครู่', 429);
+    try { return { items: await nearbyLib.nearby(kind, lat, lng) }; }
+    catch { return { items: [], error: 'ค้นหาสถานที่เพิ่มเติมไม่ได้ในขณะนี้ (ต้องมีอินเทอร์เน็ต)' }; }     // never fail the whole sheet: staff-added places still show
   });
   route('GET', '/api/patient/places', 'patient', () => db.places.map(({ id, kind, name, phone, address, note, lat, lng }) => ({ id, kind, name, phone, address, note, lat, lng })));
 

@@ -36,10 +36,11 @@
   // ตรวจเวอร์ชัน: ถ้าหน้านี้ถูก cache เป็นเวอร์ชันเก่า (ไม่ตรงกับเซิร์ฟเวอร์) ให้รีโหลดตัวเองหนึ่งครั้ง
   const myBuild = (document.querySelector('meta[name=build]') || {}).content;
   const checkBuild = (c) => {
-    const el = $('#lbuild'); if (el) el.textContent = c.build ? 'v' + c.build : '';
+    const label = c.build ? 'v' + c.build + (c.testMode ? ' test beta' : '') : '';
+    for (const id of ['#lbuild', '#mebuild']) { const el = $(id); if (el) el.textContent = label; }
     if (c.build && myBuild && c.build !== myBuild) { try { if (sessionStorage.getItem('pnc-reloaded') === c.build) return; sessionStorage.setItem('pnc-reloaded', c.build); } catch (_) { /* private mode */ } location.reload(); }
   };
-  const loadCfg = () => fetch('/api/public/config', { cache: 'no-store' }).then(r => r.json()).then(c => { cfg = c; $('#ltest').hidden = !c.testMode; checkBuild(c); }).catch(() => {});
+  const loadCfg = () => fetch('/api/public/config', { cache: 'no-store' }).then(r => r.json()).then(c => { cfg = c; checkBuild(c); }).catch(() => {});
   loadCfg();
   function showLogin(msg) { stopScan(); me = null; login.hidden = false; $('#bottom').hidden = true; $$('.view').forEach(v => v.classList.remove('on')); stepOne(msg); }
   function stopScan() { if (scanner) { scanner.cancel(); scanner = null; } }
@@ -65,22 +66,24 @@
   function stepProfile() {
     const today = cfg.today || iso(new Date());
     lform.hidden = true; lprof.hidden = false; $('#lmsg3').textContent = '';
-    lprof.deliveryDate.min = addD(today, -180); lprof.deliveryDate.max = addD(today, 30);
-    if (!lprof.deliveryDate.value) lprof.deliveryDate.value = addD(today, -7);
+    lprof.deliveryDate.min = addD(today, -180); lprof.deliveryDate.max = today;          // วันนี้หรือก่อนหน้าเท่านั้น (ห้ามวันที่ยังไม่ถึง)
+    if (!lprof.deliveryDate.value || lprof.deliveryDate.value > today) lprof.deliveryDate.value = addD(today, -7);
     previewD();
   }
   function previewD() {
     const today = cfg.today || iso(new Date()), v = lprof.deliveryDate.value; if (!v) { $('#dpreview').textContent = ''; return; }
     const D = Math.round((Date.parse(today) - Date.parse(v)) / 86400e3);
-    $('#dpreview').innerHTML = D < 0 ? `ยังไม่ถึงวันคลอด (อีก ${-D} วัน)` : D === 0 ? 'วันนี้คือวันคลอด <b>D0</b>' : `วันคลอด = <b>D0</b> · วันนี้ = <b>D${D}</b>`;
+    $('#dpreview').innerHTML = D < 0 ? '<span class="errt">วันที่คลอดต้องเป็นวันนี้หรือก่อนหน้า</span>' : D === 0 ? 'วันนี้ = <b>วันคลอด</b>' : `วันนี้ = <b>หลังคลอด ${D} วัน</b>`;
   }
   lprof.deliveryDate.addEventListener('input', previewD);
   lprof.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg3').textContent = '';
+    if (lprof.deliveryDate.value > (cfg.today || iso(new Date()))) return ($('#lmsg3').textContent = 'วันที่คลอดต้องเป็นวันนี้หรือก่อนหน้า (เลือกวันที่ยังไม่ถึงไม่ได้)');
     try { const r = await api('POST', '/api/patient/test-profile', { deliveryDate: lprof.deliveryDate.value, deliveryMode: lprof.deliveryMode.value }); lprof.hidden = true; if (r.skipScan) { lform.reset(); return await startApp(); } mockMode = true; await stepTwo(); }
     catch (er) { if (er.status === 401) return stepOne(er.message); $('#lmsg3').textContent = er.message; }
   });
   $('#lback2').addEventListener('click', () => stepOne());
+  lform.id.addEventListener('input', () => { const v = lform.id.value.replace(/[^0-9-]/g, ''); if (v !== lform.id.value) lform.id.value = v; });   // HN/เบอร์โทร: เลข (และ -) เท่านั้น
   lform.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg').textContent = ''; $('#lbtn').disabled = true;
     try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); if (r.skipScan) { lform.reset(); return await startApp(); }
@@ -91,45 +94,58 @@
   $('#lback').addEventListener('click', () => stepOne());
   $('#logout').addEventListener('click', async () => { await api('POST', '/api/patient/logout').catch(() => {}); location.hash = ''; showLogin(); });
 
-  // ---------- GPS: สถานพยาบาลใกล้ตัว — ใช้รายการที่เจ้าหน้าที่ตั้งไว้ (เรียงตามระยะทาง) ถ้าไม่มี ใช้ค้นหา Google Maps ----------
-  let places = [];
-  function googleNearby(kind) {
-    const q = kind === 'hospital' ? 'โรงพยาบาล' : 'คลินิกการแพทย์แผนไทย';
-    const w = window.open('about:blank', '_blank');                               // เปิดแท็บทันที (กัน popup blocker) แล้วค่อยใส่ตำแหน่ง
-    const go = (ll) => {
-      const url = ll ? `https://www.google.com/maps/search/${encodeURIComponent(q)}/@${ll.lat},${ll.lng},14z` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + 'ใกล้ฉัน')}`;
-      if (w) w.location.href = url; else location.href = url;
-    };
-    if (!navigator.geolocation) return go(null);
-    navigator.geolocation.getCurrentPosition(pos => go({ lat: pos.coords.latitude, lng: pos.coords.longitude }), () => go(null), { timeout: 8000, maximumAge: 300000 });
-  }
+  // ---------- แผนที่ในแอป: ตำแหน่งของฉัน + สถานที่ที่เจ้าหน้าที่เพิ่ม (มาก่อน) + สถานที่ใกล้เคียงจาก OpenStreetMap ----------
+  let places = [], leafletReady = null, psMap = null;
+  const loadLeaflet = () => leafletReady || (leafletReady = new Promise((res, rej) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/vendor/leaflet/leaflet.css'; document.head.appendChild(css);
+    const js = document.createElement('script'); js.src = '/vendor/leaflet/leaflet.js'; js.onload = () => res(window.L); js.onerror = () => { leafletReady = null; rej(new Error('โหลดแผนที่ไม่สำเร็จ')); }; document.head.appendChild(js);
+  }));
   const km = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
   const tel = (v) => String(v || '').replace(/[^0-9+]/g, '');
-  function showPlaces(kind, list) {
-    const sheet = $('#placesheet'), KT = kind === 'hospital' ? ['🏥', 'โรงพยาบาลใกล้ฉัน'] : ['🌿', 'คลินิกแพทย์แผนไทยใกล้ฉัน'];
-    $('#ps-title').textContent = `${KT[0]} ${KT[1]}`; $('#ps-sub').textContent = 'กำลังหาตำแหน่งของคุณ...';
-    const render = (me2) => {
-      const rows = list.map(p => ({ ...p, d: me2 ? km(me2, p) : null })).sort((a, b) => (a.d ?? 0) - (b.d ?? 0)).slice(0, 5);
-      $('#ps-sub').textContent = me2 ? 'เรียงตามระยะทางจากตำแหน่งของคุณ' : 'ไม่ทราบตำแหน่งของคุณ (ยังไม่ได้อนุญาต GPS) — แสดงตามรายการ';
-      $('#ps-list').innerHTML = rows.map(p => `<div class="place"><div class="pn"><b>${esc(p.name)}</b>${p.d != null ? `<span class="dist">${p.d < 1 ? Math.round(p.d * 1000) + ' ม.' : p.d.toFixed(1) + ' กม.'}</span>` : ''}</div>
-        ${p.address ? `<div class="muted">${esc(p.address)}</div>` : ''}${p.note ? `<div class="muted">${esc(p.note)}</div>` : ''}
-        <div class="refbtns" style="margin-top:6px">${tel(p.phone) ? `<a class="mapbtn" href="tel:${tel(p.phone)}">📞 ${esc(p.phone)}</a>` : ''}<a class="mapbtn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}">🧭 นำทาง</a></div></div>`).join('');
-    };
-    render(null); sheet.hidden = false;
-    if (navigator.geolocation) navigator.geolocation.getCurrentPosition(pos => render({ lat: pos.coords.latitude, lng: pos.coords.longitude }), () => {}, { timeout: 8000, maximumAge: 300000 });
-    $('#ps-google').onclick = () => googleNearby(kind);
-    $('#ps-close').onclick = () => { sheet.hidden = true; };
+  const normN = (t) => String(t || '').replace(/\s+/g, '').toLowerCase();
+  const getPos = () => new Promise(res => { if (!navigator.geolocation) return res(null); navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lng: p.coords.longitude }), () => res(null), { timeout: 9000, maximumAge: 120000, enableHighAccuracy: true }); });
+  function mergePlaces(admin, osm) {                       // ที่เจ้าหน้าที่เพิ่มชนะเสมอ: ตัดรายการ OSM ที่อยู่ใกล้กัน (<150 ม.) หรือชื่อเดียวกัน
+    const keep = osm.filter(o => !admin.some(a => normN(a.name) === normN(o.name) || km(a, o) < 0.15));
+    return [...admin.map(a => ({ ...a, source: 'admin' })), ...keep];
   }
-  function openNearby(kind) {
-    const list = places.filter(p => p.kind === kind);
-    if (list.length) { $('#msgbox').hidden = true; return showPlaces(kind, list); }
-    googleNearby(kind);
+  const directionsUrl = (p, me2) => `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${me2 ? me2.lat + ',' + me2.lng : ''};${p.lat},${p.lng}`;
+  async function showPlaces(kind) {
+    const sheet = $('#placesheet'), T = kind === 'hospital' ? ['🏥', 'โรงพยาบาลใกล้ฉัน'] : ['🌿', 'คลินิกแพทย์แผนไทยใกล้ฉัน'];
+    $('#ps-title').textContent = `${T[0]} ${T[1]}`; $('#ps-sub').textContent = 'กำลังหาตำแหน่งของคุณ...'; $('#ps-list').innerHTML = ''; sheet.hidden = false;
+    $('#ps-close').onclick = () => { sheet.hidden = true; if (psMap) { psMap.remove(); psMap = null; } };
+    const admin = places.filter(p => p.kind === kind);
+    const [pos, L] = await Promise.all([getPos(), loadLeaflet().catch(() => null)]);
+    let osm = [], note = '';
+    if (pos) { try { const r = await api('GET', `/api/patient/nearby?kind=${kind}&lat=${pos.lat.toFixed(5)}&lng=${pos.lng.toFixed(5)}`); osm = r.items; if (r.error) note = r.error; } catch (er) { note = er.message; } }
+    const all = mergePlaces(admin, osm).map(p => ({ ...p, d: pos ? km(pos, p) : null }));
+    const by = (a, b) => (a.d ?? 0) - (b.d ?? 0);
+    const list = [...all.filter(p => p.source === 'admin').sort(by), ...all.filter(p => p.source !== 'admin').sort(by).slice(0, 8)];
+    $('#ps-sub').textContent = (pos ? 'เรียงตามระยะทางจากตำแหน่งของคุณ' : 'ไม่ทราบตำแหน่งของคุณ (ยังไม่ได้อนุญาต GPS) — แสดงตามรายการ') + (note ? ` · ${note}` : '') + (!L ? ' · แผนที่โหลดไม่ได้' : '');
+    if (L) {
+      if (psMap) { psMap.remove(); psMap = null; }
+      const first = list[0];
+      psMap = L.map('ps-map', { zoomControl: true, attributionControl: true }).setView(pos ? [pos.lat, pos.lng] : first ? [first.lat, first.lng] : [13.7563, 100.5018], pos ? 13 : first ? 14 : 6);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(psMap);
+      const bounds = []; if (pos) { L.circleMarker([pos.lat, pos.lng], { radius: 8, color: '#fff', weight: 3, fillColor: '#2f80ed', fillOpacity: 1 }).bindTooltip('ตำแหน่งของคุณ').addTo(psMap); bounds.push([pos.lat, pos.lng]); }
+      list.forEach((p, i) => { const mk = L.circleMarker([p.lat, p.lng], { radius: p.source === 'admin' ? 10 : 7, color: '#fff', weight: 2, fillColor: p.source === 'admin' ? '#e0476a' : '#8d7079', fillOpacity: 1 }).bindTooltip(p.name).addTo(psMap); mk.on('click', () => $(`#ps-list [data-i="${i}"]`)?.scrollIntoView({ block: 'nearest' })); p._mk = mk; bounds.push([p.lat, p.lng]); });
+      if (bounds.length > 1) psMap.fitBounds(bounds.slice(0, 4), { padding: [30, 30], maxZoom: 15 });
+      setTimeout(() => psMap && psMap.invalidateSize(), 150);
+    } else $('#ps-map').innerHTML = '<p class="muted" style="padding:14px;text-align:center">ไม่สามารถแสดงแผนที่ได้ — ดูรายการด้านล่าง</p>';
+    $('#ps-list').innerHTML = list.length ? list.map((p, i) => `<div class="place" data-i="${i}"><div class="pn"><b>${esc(p.name)}</b>${p.d != null ? `<span class="dist">${p.d < 1 ? Math.round(p.d * 1000) + ' ม.' : p.d.toFixed(1) + ' กม.'}</span>` : ''}</div>
+      <div class="muted">${p.source === 'admin' ? '⭐ แนะนำโดยโรงพยาบาล' : 'จากแผนที่ OpenStreetMap'}${p.address ? ' · ' + esc(p.address) : ''}${p.note ? ' · ' + esc(p.note) : ''}</div>
+      <div class="refbtns" style="margin-top:6px"><button type="button" class="mapbtn" data-pan="${i}">📍 ดูบนแผนที่</button>${tel(p.phone) ? `<a class="mapbtn" href="tel:${tel(p.phone)}">📞 ${esc(p.phone)}</a>` : ''}<a class="mapbtn" target="_blank" rel="noopener" href="${directionsUrl(p, pos)}">🧭 นำทาง</a></div></div>`).join('')
+      : `<div class="card"><p class="muted">ไม่พบ${T[1].replace('ใกล้ฉัน', '')}ใกล้เคียง${pos ? '' : ' (เปิด GPS เพื่อค้นหา)'}</p></div>`;
+    $('#ps-list').onclick = (e) => { const b = e.target.closest('[data-pan]'); if (!b || !psMap) return; const p = list[+b.dataset.pan]; psMap.setView([p.lat, p.lng], 16); p._mk.openTooltip(); $('#ps-map').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
   }
+  function openNearby(kind) { $('#msgbox').hidden = true; showPlaces(kind); }
   document.addEventListener('click', e => { const b = e.target.closest('[data-near]'); if (b) openNearby(b.dataset.near); });
   function referralBox(r) {
-    if (r.referral === 'hospital') return `<div class="refbox hospital"><p>🚨 <b>ควรไปพบแพทย์ที่โรงพยาบาลทันที</b> (โทร 1669 หากฉุกเฉิน)</p><div class="refbtns"><button type="button" class="mapbtn h" data-near="hospital">📍 โรงพยาบาลใกล้ฉัน (GPS)</button></div></div>`;
-    if (r.referral === 'ttm') return `<div class="refbox ttm"><p>🌿 <b>แนะนำพบแพทย์แผนไทย</b> เช่น คัดตึง/ปวดตึงเต้านม น้ำนมไหลน้อย</p><div class="refbtns"><button type="button" class="mapbtn" data-near="ttm">📍 คลินิกแพทย์แผนไทยใกล้ฉัน (GPS)</button></div></div>`;
-    if (r.referral === 'both') return `<div class="refbox both"><p>🟠 <b>ให้บุคลากรประเมินโดยเร็ว (ภายในวันนี้)</b> — เลือกสถานที่ที่สะดวก</p><div class="refbtns"><button type="button" class="mapbtn h" data-near="hospital">📍 โรงพยาบาลใกล้ฉัน</button><button type="button" class="mapbtn" data-near="ttm">📍 คลินิกแพทย์แผนไทยใกล้ฉัน</button></div></div>`;
+    const inHosp = me && me.inHospital;
+    if (r.level === 'red' || r.level === 'orange') {
+      if (inHosp) return `<div class="refbox hospital"><p>🏥 <b>กรุณาแจ้งพยาบาลในแผนก</b> ตอนนี้ยังอยู่ในโรงพยาบาล</p></div>`;    // ช่วงอยู่ รพ. (คลอดปกติ 48 ชม. / ผ่าคลอด 72 ชม.)
+    }
+    if (r.referral === 'hospital') return `<div class="refbox hospital"><p>🚨 <b>ควรไปพบแพทย์ที่โรงพยาบาลทันที</b> (โทร 1669 หากฉุกเฉิน)</p><div class="refbtns"><button type="button" class="mapbtn h" data-near="hospital">📍 โรงพยาบาลใกล้ฉัน</button></div></div>`;
+    if (r.referral === 'ttm') return `<div class="refbox ttm"><p>🌿 <b>แนะนำพบแพทย์แผนไทย</b> เช่น คัดตึง/ปวดตึงเต้านม น้ำนมไหลน้อย</p><div class="refbtns"><button type="button" class="mapbtn" data-near="ttm">📍 คลินิกแพทย์แผนไทยใกล้ฉัน</button></div></div>`;
     return '';
   }
 
@@ -150,8 +166,8 @@
       <ul class="reasons">${r.reasons.map(x => `<li>${esc(x.text)}</li>`).join('')}</ul>
       <p><b>แนวทาง:</b> ${esc(r.action)}</p>
       ${referralBox(r)}
-      ${r.level === 'red' ? '<div class="alert">ระบบหยุดให้คำแนะนำทั่วไป — โปรดติดต่อโรงพยาบาลทันที</div>' : ''}
-      ${a.selfHarm ? '<div class="alert">สายด่วนสุขภาพจิต <b>1323</b> (24 ชม.)</div>' : ''}
+      ${r.level === 'red' ? `<div class="alert">ระบบหยุดให้คำแนะนำทั่วไป — ${me && me.inHospital ? 'โปรดแจ้งพยาบาลทันที' : 'โปรดติดต่อโรงพยาบาลทันที'}</div>` : ''}
+      ${a.selfHarm || a.stress === 'suicidal' ? '<div class="alert">สายด่วนสุขภาพจิต <b>1323</b> (24 ชม.)</div>' : ''}
       ${missing}
       <h2 style="margin-top:16px">แนวทางแพทย์แผนไทย</h2>
       <p class="muted">${esc(t.message)}</p>
@@ -245,18 +261,19 @@
     triage = false; quick.innerHTML = '';
     const r = risk.assess(ans), t = ttm.recommend(ans, r);
     const lines = [`ผลคัดกรองเบื้องต้น: ${r.icon} ${r.label} (${r.th})`, ...r.reasons.map(x => '• ' + x.text), '', 'แนวทาง: ' + r.action];
-    if (r.level === 'red') lines.push('', '🚨 โปรดโทร 1669 หรือไปโรงพยาบาลทันที ระบบหยุดให้คำแนะนำทั่วไปและแจ้งเจ้าหน้าที่ให้ติดตาม');
+    if (r.level === 'red') lines.push('', me && me.inHospital ? '🚨 กรุณาแจ้งพยาบาลในแผนกทันที ระบบหยุดให้คำแนะนำทั่วไปและแจ้งเจ้าหน้าที่ให้ติดตาม' : '🚨 โปรดโทร 1669 หรือไปโรงพยาบาลทันที ระบบหยุดให้คำแนะนำทั่วไปและแจ้งเจ้าหน้าที่ให้ติดตาม');
     else if (r.level === 'green' || r.level === 'yellow' || r.ttmOnly) {
       lines.push('', 'คำแนะนำดูแลตนเอง: พักผ่อนให้เพียงพอ ดื่มน้ำ ให้นมตามต้องการของลูก สังเกตเลือดออก ไข้ และอาการปวดต่อเนื่อง');
       const c = t.items.filter(i => i.status === 'consider').map(i => '• ' + i.name);
       if (c.length) lines.push('', 'บริการแพทย์แผนไทยที่อาจพิจารณา (ต้องให้แพทย์แผนไทยประเมินและยืนยันก่อน):', ...c);
     } else lines.push('', 'ยังไม่แนะนำหัตถการใด ๆ จนกว่าบุคลากรจะประเมิน');
-    if (ans.selfHarm) lines.push('', 'สายด่วนสุขภาพจิต 1323 (24 ชม.)');
+    if (ans.selfHarm || ans.stress === 'suicidal') lines.push('', 'สายด่วนสุขภาพจิต 1323 (24 ชม.)');
     lines.push('', 'มีคำถามอื่น พิมพ์ถามได้เลยค่ะ');
     say(lines.join('\n'));
     if (me && me.days >= 1) api('POST', '/api/patient/assessment', { input: ans, source: 'chat' }).then(() => Promise.all([loadHistory(), loadNotifs()])).catch(() => {});   // ส่งผลคัดกรองให้เจ้าหน้าที่เห็น
-    if (r.referral === 'hospital' || r.referral === 'both') chip('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h');
-    if (r.referral === 'ttm' || r.referral === 'both') chip('📍 คลินิกแพทย์แผนไทยใกล้ฉัน', () => openNearby('ttm'), 'mapbtn');
+    const hosp = me && me.inHospital && (r.level === 'red' || r.level === 'orange');
+    if (hosp) say('🏥 กรุณาแจ้งพยาบาลในแผนก ตอนนี้ยังอยู่ในโรงพยาบาล');
+    else { if (r.referral === 'hospital') chip('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h'); if (r.referral === 'ttm') chip('📍 คลินิกแพทย์แผนไทยใกล้ฉัน', () => openNearby('ttm'), 'mapbtn'); }
     chip('คัดกรองใหม่', startTriage); chip('ถามเรื่องอื่น', homeChips);
   }
   let asking = false;
@@ -269,7 +286,7 @@
       const r = await api('POST', '/api/patient/chat', { message: text, history: aiHistory });
       wait.textContent = r.reply;
       if (r.source === 'ai') aiHistory.push({ role: 'user', content: text }, { role: 'assistant', content: r.reply });
-      if (r.referral) { chip('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h'); }
+      if (r.referral && !r.inHospital) { chip('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h'); }
       else if (r.suggest) { quick.innerHTML = ''; chip('🩺 เริ่มคัดกรองอาการ', startTriage); r.suggest.forEach(t => chip(t, () => ask(t))); }
       else if (!triage) { if (!quick.querySelector('.mapbtn')) { homeChips(); } }
     } catch (er) { wait.textContent = er.message; }
@@ -291,7 +308,7 @@
     let html = '';
     for (const c of ['medicine', 'herb', 'supplement', 'food']) {
       const g = list.filter(h => (h.category || 'herb') === c); if (!g.length) continue;
-      html += `<li class="grp" role="presentation">${CAT[c]}</li>` + g.map(h => `<li role="option" tabindex="-1" data-name="${esc(h.name)}">${esc(h.name)}${h.baseline === 'consult' ? ' <small>ควรปรึกษา</small>' : ''}${h.src === 'demo' ? ' <small class="demo">ตัวอย่าง</small>' : ''}</li>`).join('');
+      html += `<li class="grp" role="presentation">${CAT[c]}</li>` + g.map(h => `<li role="option" tabindex="-1" data-name="${esc(h.name)}">${esc(h.name)}</li>`).join('');
     }
     if (!html) html = `<li class="none" role="presentation">ไม่พบ “${esc(filter)}” ในรายการ — กด “ตรวจสอบ” ระบบจะแจ้งให้ปรึกษาบุคลากร</li>`;
     opts.innerHTML = html;
@@ -354,6 +371,26 @@
     [17, ['สัปดาห์', 'ที่ 3'], ['ส.3']], [24, ['สัปดาห์', 'ที่ 4'], ['ส.4']], [31, ['สัปดาห์', 'ที่ 5'], ['ส.5']], [38, ['สัปดาห์', 'ที่ 6'], ['ส.6']]];
   const colOf = (d) => d <= 7 ? Math.max(0, d - 1) : d <= 14 ? 7 : d <= 21 ? 8 : d <= 28 ? 9 : d <= 35 ? 10 : 11;
   const CCOL = { green: '#4caf7a', yellow: '#f2c230', orange: '#f08a3c', red: '#d62b45' };
+  // กราฟเล็กแนวยาวสำหรับหน้าแรก: แถบสี 4 ระดับ + จุดผลประเมิน + วันนี้
+  function miniSVG() {
+    const W = 330, H = 62, L = 4, R = 4, T = 4, B = 4, rank = { green: 0, yellow: 1, orange: 2, red: 3 };
+    const bh = (H - T - B) / 4, cw = (W - L - R) / COLS.length, x = i => L + cw * (i + 0.5), y = rk => T + (3 - rk + 0.5) * bh;
+    const perCol = Array(COLS.length).fill(null); for (const h of history) perCol[colOf(h.day)] = h;
+    const bands = ['red', 'orange', 'yellow', 'green'].map((l, i) => `<rect x="${L}" y="${T + i * bh}" width="${W - L - R}" height="${bh}" fill="${CCOL[l]}" opacity=".16"/>`).join('');
+    const ti = colOf(me ? Math.max(1, me.days) : 1);
+    const today = `<rect x="${L + cw * ti}" y="${T}" width="${cw}" height="${H - T - B}" fill="#ffd6de" opacity=".7"/>`;
+    const pts = perCol.map((h, i) => h && [x(i), y(rank[h.level]), h.level]).filter(Boolean);
+    const line = pts.length > 1 ? `<polyline points="${pts.map(q => q[0] + ',' + q[1]).join(' ')}" fill="none" stroke="#c9a24b" stroke-width="1.6"/>` : '';
+    const dots = pts.map(q => `<circle cx="${q[0]}" cy="${q[1]}" r="3.4" fill="${CCOL[q[2]]}" stroke="#fff" stroke-width="1"/>`).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟระดับความเสี่ยงย่อ">${bands}${today}${line}${dots}</svg>`;
+  }
+  function renderRisk() {
+    if (!me) return;
+    const t = history.find(h => h.day === me.days), b = $('#rbadge'), L = { green: ['🟢', 'ปกติ'], yellow: ['🟡', 'ควรติดตาม'], orange: ['🟠', 'เสี่ยง'], red: ['🔴', 'ฉุกเฉิน'] };
+    if (t) { b.className = 'rbadge b-' + t.level; b.textContent = `${L[t.level][0]} ${L[t.level][1]}`; }
+    else { b.className = 'rbadge none'; b.textContent = me.days >= 1 ? 'ยังไม่ได้ประเมิน' : me.days === 0 ? 'เริ่มประเมินพรุ่งนี้' : 'ยังไม่ถึงวันคลอด'; }
+    const btn = $('#rassess'); btn.hidden = me.days < 1; btn.textContent = t ? '📝 แก้ไขการประเมิน' : '📝 ประเมินอาการหลังคลอด';
+  }
   function chartSVG(wide) {
     const W = wide ? 330 : 258, H = wide ? 210 : 214, L = wide ? 52 : 46, R = 4, T = 6, B = wide ? 74 : 86, bands = ['red', 'orange', 'yellow', 'green'];
     const NAME = { red: 'รุนแรง', orange: 'เสี่ยง', yellow: 'ต้องติดตาม', green: 'ปกติ' };
@@ -381,7 +418,8 @@
   const LV = { green: ['🟢', 'ปกติ'], yellow: ['🟡', 'ควรติดตาม'], orange: ['🟠', 'เสี่ยง'], red: ['🔴', 'ฉุกเฉิน'] };
   async function loadHistory() {
     history = await api('GET', '/api/patient/assessments');
-    $$('[data-chart]').forEach(el => el.innerHTML = chartSVG(el.dataset.chart === 'wide'));
+    $$('[data-chart]').forEach(el => el.innerHTML = el.dataset.chart === 'mini' ? miniSVG() : chartSVG(el.dataset.chart === 'wide'));
+    renderRisk();
     $('#histlist').innerHTML = history.length ? [...history].reverse().map(h => `<div class="hist"><span>${LV[h.level][0]}</span><b>${h.level === 'green' ? 'ปกติ' : esc(h.reasons[0] || LV[h.level][1])}</b><small>วัน ${h.day}</small></div>`).join('') : '<p class="muted">ยังไม่มีประวัติ — ไปที่ “ติดตามและประเมินอาการ”</p>';
   }
 
@@ -403,11 +441,11 @@
   const fmtDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { dateStyle: 'long' });
   function renderProfile() {
     $('#b-hn').textContent = me.hn; $('#b-name').textContent = me.name; $('#b-date').textContent = fmtDate(me.deliveryDate);
-    $('#b-days').textContent = me.days < 0 ? `ก่อนคลอด (อีก ${-me.days} วัน)` : `D${me.days}` + (me.days === 0 ? ' (วันคลอด)' : ''); $('#b-mode').textContent = me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด';
+    $('#b-days').textContent = me.days < 0 ? `ก่อนคลอด (อีก ${-me.days} วัน)` : me.days === 0 ? 'วันคลอด' : `${me.days} วัน`; $('#b-mode').textContent = me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด';
     $('#b-age').textContent = me.age != null ? me.age + ' ปี' : '-'; $('#b-ga').textContent = me.gestationalWeeks != null ? me.gestationalWeeks + ' สัปดาห์' : '-'; $('#b-cov').textContent = me.coverage || '-';
-    const dl = me.days < 0 ? `ก่อนคลอดอีก ${-me.days} วัน` : `D${me.days}`;
+    const dl = me.days < 0 ? `ก่อนคลอดอีก ${-me.days} วัน` : me.days === 0 ? 'วันคลอด' : `หลังคลอด ${me.days} วัน`;
     $('#me-name').textContent = me.name; $('#me-sub').textContent = `HN ${me.hn} · ${dl} · ${me.deliveryMode === 'cesarean' ? 'ผ่าตัดคลอด' : 'ทางช่องคลอด'}`;
-    const chip = $('#dchip'); chip.hidden = false; chip.textContent = me.days < 0 ? `ก่อนคลอดอีก ${-me.days} วัน` : me.days === 0 ? 'วันนี้คือวันคลอด (D0)' : `วันนี้ D${me.days} หลังคลอด`;
+    const chip = $('#dchip'); chip.hidden = false; chip.textContent = me.days < 0 ? `ก่อนคลอดอีก ${-me.days} วัน` : me.days === 0 ? 'วันนี้คือวันคลอด' : `วันนี้ = หลังคลอด ${me.days} วัน`;
     form.elements.delivery.value = me.deliveryMode;
   }
 

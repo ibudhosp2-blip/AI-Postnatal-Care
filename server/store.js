@@ -18,6 +18,7 @@ function emptyDb() {
       line: { tokenEnc: '' },
       face: { threshold: 0.5 },
       testMode: { enabled: false },
+      inpatient: { vaginalHours: 48, cesareanHours: 72 },
     },
     knowledge: { herbs: [], myths: [], library: [] },
   };

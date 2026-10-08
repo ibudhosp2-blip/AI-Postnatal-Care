@@ -23,10 +23,10 @@ test('moderate pain is yellow; breast engorgement / low milk are orange (ttm) wi
     assert.strictEqual(r.level, 'orange'); assert.strictEqual(r.ttmOnly, true); assert.strictEqual(r.referral, 'ttm');
   }
 });
-test('referral: red → hospital; medical orange → both; ttm + medical mix is not ttmOnly; green/yellow → none', () => {
+test('referral: red → hospital only; orange → TTM clinic only when TTM-type, no map button for medical orange; green/yellow → none', () => {
   assert.strictEqual(assess({ ...base, bleeding: 'heavy' }).referral, 'hospital');
-  const f = assess({ ...base, tempC: 38.4 }); assert.strictEqual(f.referral, 'both'); assert.strictEqual(f.ttmOnly, false);
-  const mix = assess({ ...base, tempC: 38.4, milk: 'low' }); assert.strictEqual(mix.ttmOnly, false); assert.strictEqual(mix.referral, 'both');
+  const f = assess({ ...base, tempC: 38.4 }); assert.strictEqual(f.referral, null); assert.strictEqual(f.ttmOnly, false); assert.strictEqual(f.level, 'orange');
+  const mix = assess({ ...base, tempC: 38.4, milk: 'low' }); assert.strictEqual(mix.ttmOnly, false); assert.strictEqual(mix.referral, null);
   assert.strictEqual(assess(base).referral, null); assert.strictEqual(assess({ ...base, pain: 5 }).referral, null);
 });
 test('highest level wins and reasons sorted', () => {
@@ -70,3 +70,13 @@ test('Herbs: ginger ok, but consult with anticoagulant', () => {
   assert.strictEqual(check('ขิง', { anticoag: true }).verdict, 'consult');
 });
 test('Herbs: licorice avoided with hypertension', () => assert.strictEqual(check('ชะเอมเทศ', { htn: true }).verdict, 'avoid'));
+
+test('stress question: none→green, mild→yellow, high→orange, suicidal→red (and never a TTM/hospital mix-up)', () => {
+  const L = (stress) => assess({ ...base, epds: undefined, stress });
+  assert.strictEqual(L('none').level, 'green'); assert.strictEqual(L('mild').level, 'yellow');
+  assert.strictEqual(L('high').level, 'orange'); assert.strictEqual(L('suicidal').level, 'red');
+  assert.strictEqual(L('suicidal').referral, 'hospital'); assert.strictEqual(L('high').referral, null);
+  assert.ok(L('suicidal').reasons[0].text.includes('ฆ่าตัวตาย'));
+  assert.ok(!assess({ ...base, epds: undefined, stress: 'none' }).missing.includes('ระดับความเครียด'));
+  assert.ok(assess({ days: 5 }).missing.includes('ระดับความเครียด'));
+});

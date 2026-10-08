@@ -22,7 +22,7 @@ Admin.boot('staff', 'เจ้าหน้าที่ (admin2) — เข้า
     const G = { red: 'ฉุกเฉิน ติดตามทันที', orange: 'เสี่ยง', yellow: 'ติดตาม', green: 'ปกติ', none: 'ยังไม่ประเมิน' };
     $('#stats').innerHTML = `<div class="stats">${['red', 'orange', 'yellow', 'green', 'none'].map(l => `<div class="stat b-${l}"><b>${d.counts[l]}</b>${G[l]}</div>`).join('')}</div>`;
     $('#tb').innerHTML = `<tr><th>ระดับ</th><th>HN</th><th>ชื่อ</th><th>D</th><th>สาเหตุหลัก</th><th>ค้างประเมิน</th><th>ประเมินล่าสุด</th></tr>` +
-      (d.rows.map(r => `<tr class="clk" data-id="${r.id}"><td>${badge(r.level)}</td><td>${esc(r.hn)}</td><td>${esc(r.name)}${r.test ? ' <span class="badge b-none">ทดสอบ</span>' : ''}</td><td>${r.days < 0 ? 'ก่อนคลอด' : 'D' + r.days}</td><td>${esc(r.reasons[0] || '-')}${r.referral === 'ttm' ? ' <span class="muted">(แพทย์แผนไทย)</span>' : ''}</td><td>${r.days >= 1 ? r.missed + ' วัน' : '-'}</td><td>${r.assessedAt ? fmt(r.assessedAt) : '-'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">ยังไม่มีผู้ป่วย</td></tr>');
+      (d.rows.map(r => `<tr class="clk" data-id="${r.id}"><td>${badge(r.level)}</td><td>${esc(r.hn)}</td><td>${esc(r.name)}${r.test ? ' <span class="badge b-none">ทดสอบ</span>' : ''}${r.inHospital ? ' <span class="badge b-yellow">อยู่ รพ.</span>' : ''}</td><td>${r.days < 0 ? 'ก่อนคลอด' : 'D' + r.days}</td><td>${esc(r.reasons[0] || '-')}${r.referral === 'ttm' ? ' <span class="muted">(แพทย์แผนไทย)</span>' : ''}</td><td>${r.days >= 1 ? r.missed + ' วัน' : '-'}</td><td>${r.assessedAt ? fmt(r.assessedAt) : '-'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">ยังไม่มีผู้ป่วย</td></tr>');
     document.querySelectorAll('tr.clk').forEach(tr => tr.onclick = () => open(tr.dataset.id));
   }
   async function open(id) {

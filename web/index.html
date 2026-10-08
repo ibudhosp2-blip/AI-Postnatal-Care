@@ -19,22 +19,20 @@
       <img class="logo" src="img/logo.png" alt="">
       <h1>หมอท้อง</h1>
       <p class="sub">AI Thai Postnatal Care</p>
-      <p id="ltest" class="testbanner" hidden>🧪 <b>โหมดทดสอบ</b> — ใส่ HN และชื่ออะไรก็ได้ ระบบจะจำลองผู้ป่วยให้</p>
       <form id="lform" autocomplete="off">
-        <label>HN หรือ เบอร์โทรศัพท์<input name="id" required maxlength="30" autocapitalize="characters" autocomplete="off" inputmode="text"></label>
+        <label>HN หรือ เบอร์โทรศัพท์ (ตัวเลขเท่านั้น)<input name="id" required maxlength="30" autocomplete="off" inputmode="numeric" pattern="[0-9][0-9\-]*" title="ใส่ได้เฉพาะตัวเลข (และ -)" placeholder="เช่น 690004 หรือ 081-234-5678"></label>
         <label>ชื่อของคุณ (บางส่วนก็ได้)<input name="namePart" required maxlength="60" autocomplete="off"></label>
         <button class="primary" id="lbtn">ถัดไป</button>
         <div id="lmsg" class="lmsg" role="alert"></div>
       </form>
-      <form id="lprofile" class="lcam" hidden autocomplete="off">
+      <form id="lprofile" class="lcam compact" hidden autocomplete="off">
         <h2>วันที่คลอด</h2>
-        <p class="muted">วันที่คลอดคือ D0 ระบบจะคำนวณวันนี้เป็น Dxx ให้อัตโนมัติ</p>
-        <label>วันที่คลอด (D0)<input type="date" name="deliveryDate" required></label>
-        <label>ลักษณะการคลอด<select name="deliveryMode"><option value="vaginal">คลอดทางช่องคลอด (แจ้งเตือนฟื้นฟูเริ่ม D7)</option><option value="cesarean">ผ่าตัดคลอด (แจ้งเตือนฟื้นฟูเริ่ม D30)</option></select></label>
+        <div class="crow"><label>วันที่คลอด<input type="date" name="deliveryDate" required></label></div>
+        <div class="crow"><label>ลักษณะการคลอด<select name="deliveryMode"><option value="vaginal">คลอดทางช่องคลอด</option><option value="cesarean">ผ่าตัดคลอด</option></select></label></div>
         <div id="dpreview" class="dpreview"></div>
         <button class="primary">เข้าสู่ระบบ</button>
         <div id="lmsg3" class="lmsg" role="alert"></div>
-        <button class="link" id="lback2" type="button" style="margin:6px auto 0;display:block">ย้อนกลับ</button>
+        <button class="link" id="lback2" type="button" style="margin:2px auto 0;display:block">ย้อนกลับ</button>
       </form>
       <div id="lstep2" class="lcam" hidden>
         <h2>สแกนใบหน้า</h2>
@@ -76,16 +74,10 @@
     <p class="pill">ต้นแบบเพื่อสาธิต · ไม่ใช่คำแนะนำทางการแพทย์</p>
     <p class="dchip" id="dchip" hidden></p>
 
-    <div class="card gcard">
-      <div class="chead"><span class="cico"><svg viewBox="0 0 24 24" fill="#fff"><path d="M5 12h3v8H5zm5-6h3v14h-3zm5 3h3v11h-3z"/></svg></span><h2>กราฟแสดงระดับความเสี่ยงหลังคลอด</h2></div>
-      <div class="chart-wrap">
-        <div class="legend">
-          <small>ระดับความเสี่ยง<br>หลังคลอด</small>
-          <span class="lg g"><i>✓</i>ปกติ</span><span class="lg y"><i>◷</i>ต้องติดตาม</span><span class="lg o"><i>!</i>เสี่ยง</span><span class="lg r"><i>!</i>รุนแรง<em>(รีบพบแพทย์)</em></span>
-        </div>
-        <div class="chart" data-chart></div>
-      </div>
-      <div class="chead2"><button class="link" data-go="history">📅 ดูรายละเอียด ›</button><small class="wk">ส. = สัปดาห์</small></div>
+    <div class="card rcard">
+      <div class="rtop"><h2>ระดับความเสี่ยงวันนี้</h2><span id="rbadge" class="rbadge none">ยังไม่ได้ประเมิน</span></div>
+      <div class="chart mini" data-chart="mini"></div>
+      <div class="rbtns"><button type="button" class="mapbtn" id="rassess" data-go="assess">📝 ประเมินอาการหลังคลอด</button><button type="button" class="link" data-go="history">📈 ดูกราฟ</button></div>
     </div>
 
     <div class="tiles">
@@ -130,14 +122,13 @@
         <label>ความดันล่าง<input type="number" name="dia" inputmode="numeric" placeholder="76"></label>
       </div>
       <div class="row">
-        <label>EPDS 0–30<input type="number" name="epds" min="0" max="30" inputmode="numeric" placeholder="0–30"></label>
+        <label>มีความเครียดแค่ไหน<select name="stress"><option value="">— เลือก —</option><option value="none">ไม่เครียด</option><option value="mild">เล็กน้อย</option><option value="high">มีมาก</option><option value="suicidal">อยากฆ่าตัวตาย</option></select></label>
         <label>นอน ชม./วัน<input type="number" name="sleepHours" step="0.5" inputmode="decimal" placeholder="5"></label>
       </div>
       <fieldset><legend>มีอาการเหล่านี้ไหม</legend>
         <label class="ck"><input type="checkbox" name="chestOrBreath"> เจ็บหน้าอก/หายใจลำบาก</label>
         <label class="ck"><input type="checkbox" name="seizure"> ชัก/หมดสติ</label>
         <label class="ck"><input type="checkbox" name="headacheVision"> ปวดหัวมาก/ตาพร่า</label>
-        <label class="ck"><input type="checkbox" name="selfHarm"> คิดทำร้ายตัวเอง</label>
         <label class="ck"><input type="checkbox" name="foulLochia"> น้ำคาวปลาเหม็น</label>
         <label class="ck"><input type="checkbox" name="severeAbdPain"> ปวดท้องน้อยมาก</label>
         <label class="ck"><input type="checkbox" name="calfPain"> ปวด/บวมน่องข้างเดียว</label>
@@ -224,7 +215,8 @@
       <span class="muted" id="me-sub">-</span>
     </div>
     <button class="primary" id="logout" type="button">ออกจากระบบ</button>
-    <div class="card" style="margin-top:14px"><p class="muted">AI แนะนำ — บุคลากรตัดสินใจ<br>ข้อมูลของคุณถูกเก็บอย่างปลอดภัยและเจ้าหน้าที่ที่เกี่ยวข้องเท่านั้นที่เข้าถึงได้</p></div>
+    <div class="card" style="margin-top:14px"><p class="muted" id="mebuild" style="font-size:.72rem"></p>
+    <p class="muted">AI แนะนำ — บุคลากรตัดสินใจ<br>ข้อมูลของคุณถูกเก็บอย่างปลอดภัยและเจ้าหน้าที่ที่เกี่ยวข้องเท่านั้นที่เข้าถึงได้</p></div>
   </section>
 
   <div id="msgbox" hidden role="dialog" aria-modal="true" aria-labelledby="mb-title">
@@ -239,10 +231,10 @@
 
   <div id="placesheet" hidden role="dialog" aria-modal="true" aria-labelledby="ps-title">
     <div class="mbcard psheet">
-      <h2 id="ps-title"></h2><p class="muted" id="ps-sub"></p>
+      <div class="pshead"><h2 id="ps-title"></h2><button class="link" id="ps-close" type="button">ปิด</button></div>
+      <p class="muted" id="ps-sub"></p>
+      <div id="ps-map" class="psmap"></div>
       <div id="ps-list"></div>
-      <button class="primary alt" id="ps-google" type="button" style="margin-top:10px;width:100%">ค้นหาเพิ่มเติมใน Google Maps</button>
-      <button class="link" id="ps-close" type="button" style="margin-top:10px">ปิด</button>
     </div>
   </div>
 

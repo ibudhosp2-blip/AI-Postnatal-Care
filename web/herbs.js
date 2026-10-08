@@ -3,13 +3,13 @@
  * ไม่พบในฐานข้อมูล → "ควรปรึกษาบุคลากร" เสมอ (fail-safe) */
 (function (root) {
   const DB = [
-    { name: 'ขิง', category: 'food', aliases: ['ginger', 'น้ำขิง', 'ขิงผง'], baseline: 'ok', note: 'ปริมาณระดับอาหาร',
+    { name: 'ขิง', category: 'food', aliases: ['ginger', 'น้ำขิง', 'ขิงผง'], baseline: 'ok', note: 'กินได้ในปริมาณอาหารตามปกติ',
       consultIf: { anticoag: 'ใช้ยาต้านการแข็งตัวของเลือด', hxPPH: 'มีประวัติตกเลือด (ถ้าใช้ในรูปสกัด/ขนาดสูง)' } },
-    { name: 'ขมิ้นชัน', category: 'herb', aliases: ['turmeric', 'curcumin', 'ขมิ้น'], baseline: 'ok', note: 'ระดับอาหาร; แคปซูลสกัดควรปรึกษา',
+    { name: 'ขมิ้นชัน', category: 'herb', aliases: ['turmeric', 'curcumin', 'ขมิ้น'], baseline: 'ok', note: 'กินได้ในปริมาณอาหารตามปกติ; แคปซูลสกัดควรปรึกษา',
       consultIf: { anticoag: 'ใช้ยาต้านการแข็งตัวของเลือด', hxPPH: 'มีประวัติตกเลือด', bleeding: 'มีเลือดออกผิดปกติ' } },
     { name: 'หัวปลี', category: 'food', aliases: ['banana blossom'], baseline: 'ok', note: 'อาหารพื้นบ้านเพิ่มน้ำนม (หลักฐานจำกัด)', consultIf: {} },
-    { name: 'ใบแมงลัก', category: 'food', aliases: ['แมงลัก', 'hairy basil'], baseline: 'ok', note: 'ระดับอาหาร', consultIf: {} },
-    { name: 'กระเทียม', category: 'food', aliases: ['garlic'], baseline: 'ok', note: 'ระดับอาหาร; อาหารเสริมสกัดควรปรึกษา',
+    { name: 'ใบแมงลัก', category: 'food', aliases: ['แมงลัก', 'hairy basil'], baseline: 'ok', note: 'กินได้ในปริมาณอาหารตามปกติ', consultIf: {} },
+    { name: 'กระเทียม', category: 'food', aliases: ['garlic'], baseline: 'ok', note: 'กินได้ในปริมาณอาหารตามปกติ; อาหารเสริมสกัดควรปรึกษา',
       consultIf: { anticoag: 'ใช้ยาต้านการแข็งตัวของเลือด' } },
     { name: 'ฟ้าทะลายโจร', category: 'herb', aliases: ['andrographis'], baseline: 'consult', note: 'ข้อมูลความปลอดภัยในมารดาให้นมบุตรจำกัด', consultIf: {} },
     { name: 'ว่านชักมดลูก', category: 'herb', aliases: ['kaempferia'], baseline: 'consult', note: 'ตำรับพื้นบ้านหลังคลอด',

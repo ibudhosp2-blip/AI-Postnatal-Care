@@ -23,6 +23,7 @@
     if (a.chestOrBreath) add('red', 'เจ็บหน้าอก/หายใจลำบาก');
     if (a.seizure) add('red', 'ชัก/หมดสติ');
     if (a.selfHarm) add('red', 'มีความคิดทำร้ายตัวเอง');
+    if (a.stress === 'suicidal') add('red', 'มีความคิดอยากฆ่าตัวตาย/ทำร้ายตัวเอง');
     if (sys != null && dia != null && (sys >= 160 || dia >= 110)) add('red', `ความดันโลหิตสูงรุนแรง (${sys}/${dia})`);
     if (a.headacheVision && sys != null && dia != null && (sys >= 140 || dia >= 90))
       add('red', 'ปวดศีรษะรุนแรง/ตาพร่า ร่วมกับความดันสูง สงสัยครรภ์เป็นพิษหลังคลอด');
@@ -46,10 +47,12 @@
     if (a.milk === 'low' || a.milk === 'none') add('orange', 'น้ำนมไหลน้อย/ยังไม่มีน้ำนม — แนะนำพบแพทย์แผนไทย', 'ttm');
     if (pain != null && pain >= 7) add('orange', `ปวดรุนแรง (${pain}/10)`);
     if (epds != null && epds >= 13) add('orange', `คะแนนคัดกรองซึมเศร้าหลังคลอดสูง (EPDS ${epds})`);
+    if (a.stress === 'high') add('orange', 'มีความเครียดมาก — ควรได้รับการดูแลด้านจิตใจ');
 
     // ---- Yellow: ควรติดตาม ----
     if (pain != null && pain >= 4 && pain < 7) add('yellow', `ปวดปานกลาง (${pain}/10)`);
     if (epds != null && epds >= 10 && epds < 13) add('yellow', `คะแนน EPDS ${epds} ควรติดตามอารมณ์`);
+    if (a.stress === 'mild') add('yellow', 'มีความเครียดเล็กน้อย');
     if (sleep != null && sleep < 4) add('yellow', `นอนน้อยมาก (${sleep} ชม./วัน)`);
     if (a.hxPPH && reasons.length === 0) add('yellow', 'มีประวัติตกเลือดหลังคลอด ควรเฝ้าระวังต่อเนื่อง');
 
@@ -59,12 +62,12 @@
 
     const orangeReasons = reasons.filter(r => r.level === 'orange');
     const ttmOnly = level === 'orange' && orangeReasons.every(r => r.kind === 'ttm');
-    // referral: hospital = ไปโรงพยาบาล, ttm = คลินิกแพทย์แผนไทย, both = ให้บุคลากรประเมินโดยเร็ว + ตัวเลือกทั้งสอง
-    const referral = level === 'red' ? 'hospital' : level === 'orange' ? (ttmOnly ? 'ttm' : 'both') : null;
+    // referral (ปุ่มแผนที่): แดง = โรงพยาบาล · ส้มกลุ่มแพทย์แผนไทย = คลินิกแพทย์แผนไทย · ส้มทางการแพทย์ = ไม่มีปุ่มแผนที่ (ให้บุคลากรประเมิน)
+    const referral = level === 'red' ? 'hospital' : ttmOnly ? 'ttm' : null;
     const missing = [];
     if (sys == null || dia == null) missing.push('ความดันโลหิต');
     if (temp == null) missing.push('อุณหภูมิร่างกาย');
-    if (epds == null) missing.push('แบบคัดกรองซึมเศร้า (EPDS)');
+    if (epds == null && a.stress == null) missing.push('ระดับความเครียด');
 
     return { level, ...LEVELS[level], action: ttmOnly ? 'แนะนำพบแพทย์แผนไทย (กด GPS ดูคลินิกแพทย์แผนไทยใกล้ตัว)' : LEVELS[level].action, ttmOnly, referral, reasons: reasons.sort((x, y) => LEVELS[y.level].rank - LEVELS[x.level].rank), missing };
   }

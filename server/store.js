@@ -17,6 +17,7 @@ function emptyDb() {
       his: { url: '', tokenEnc: '', enabled: false },
       line: { tokenEnc: '' },
       face: { threshold: 0.5 },
+      testMode: { enabled: false },
     },
     knowledge: { herbs: [], myths: [], library: [] },
   };

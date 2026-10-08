@@ -32,10 +32,11 @@
 
   // ---------- Login: step 1 (HN or phone + part of name) → step 2 (live face scan, no upload) ----------
   const login = $('#login'), lform = $('#lform');
-  let scanner = null, mockMode = false, livenessOn = true;
+  let scanner = null, mockMode = false, livenessOn = true, cfg = { testMode: false, today: null };
+  fetch('/api/public/config').then(r => r.json()).then(c => { cfg = c; $('#ltest').hidden = !c.testMode; }).catch(() => {});
   function showLogin(msg) { stopScan(); me = null; login.hidden = false; $('#bottom').hidden = true; $$('.view').forEach(v => v.classList.remove('on')); stepOne(msg); }
   function stopScan() { if (scanner) { scanner.cancel(); scanner = null; } }
-  function stepOne(msg) { stopScan(); login.classList.remove('scanning'); lform.hidden = false; $('#lstep2').hidden = true; $('#lmsg').textContent = msg || ''; $('#lbtn').disabled = false; }
+  function stepOne(msg) { stopScan(); login.classList.remove('scanning'); lform.hidden = false; $('#lstep2').hidden = true; $('#lprofile').hidden = true; fetch('/api/public/config').then(r => r.json()).then(c => { cfg = c; $('#ltest').hidden = !c.testMode; }).catch(() => {}); $('#lmsg').textContent = msg || ''; $('#lbtn').disabled = false; }
   async function stepTwo() {
     lform.hidden = true; login.classList.add('scanning'); $('#lstep2').hidden = false; $('#lmsg2').textContent = ''; $('#lretry').hidden = true;
     stopScan(); scanner = mockMode ? PNCFace.mockScan($('#camwrap')) : PNCFace.liveScan($('#camwrap'), { liveness: livenessOn, timeoutMs: 60000 });
@@ -50,9 +51,32 @@
       $('#lmsg2').textContent = er.message; $('#lretry').hidden = false;
     }
   }
+  // โหมดทดสอบ: ถามวันที่คลอด → วันนั้นเป็น D0, วันนี้เป็น Dxx
+  const lprof = $('#lprofile');
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const addD = (d, n) => iso(new Date(Date.parse(d) + n * 86400e3));
+  function stepProfile() {
+    const today = cfg.today || iso(new Date());
+    lform.hidden = true; lprof.hidden = false; $('#lmsg3').textContent = '';
+    lprof.deliveryDate.min = addD(today, -180); lprof.deliveryDate.max = addD(today, 30);
+    if (!lprof.deliveryDate.value) lprof.deliveryDate.value = addD(today, -7);
+    previewD();
+  }
+  function previewD() {
+    const today = cfg.today || iso(new Date()), v = lprof.deliveryDate.value; if (!v) { $('#dpreview').textContent = ''; return; }
+    const D = Math.round((Date.parse(today) - Date.parse(v)) / 86400e3);
+    $('#dpreview').innerHTML = D < 0 ? `ยังไม่ถึงวันคลอด (อีก ${-D} วัน)` : D === 0 ? 'วันนี้คือวันคลอด <b>D0</b>' : `วันคลอด = <b>D0</b> · วันนี้ = <b>D${D}</b>`;
+  }
+  lprof.deliveryDate.addEventListener('input', previewD);
+  lprof.addEventListener('submit', async (e) => {
+    e.preventDefault(); $('#lmsg3').textContent = '';
+    try { await api('POST', '/api/patient/test-profile', { deliveryDate: lprof.deliveryDate.value, deliveryMode: lprof.deliveryMode.value }); lprof.hidden = true; mockMode = true; await stepTwo(); }
+    catch (er) { if (er.status === 401) return stepOne(er.message); $('#lmsg3').textContent = er.message; }
+  });
+  $('#lback2').addEventListener('click', () => stepOne());
   lform.addEventListener('submit', async (e) => {
     e.preventDefault(); $('#lmsg').textContent = ''; $('#lbtn').disabled = true;
-    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); mockMode = !!r.mock; livenessOn = r.liveness !== false; await stepTwo(); }
+    try { const r = await api('POST', '/api/patient/identify', { id: lform.id.value.trim(), namePart: lform.namePart.value.trim() }); mockMode = !!r.mock; livenessOn = r.liveness !== false; if (r.test) return stepProfile(); await stepTwo(); }
     catch (er) { $('#lmsg').textContent = er.message; } finally { $('#lbtn').disabled = false; }
   });
   $('#lretry').addEventListener('click', stepTwo);
@@ -168,7 +192,7 @@
     } catch (e) { $('#saveMsg').textContent = e.message; } finally { btn.disabled = me.days < 1; }
   });
 
-  // ---------- Chat: triage first (rule-based), then optional AI Q&A ----------
+  // ---------- Chat: ถามอะไรก็ได้ (free text) + คัดกรองอาการแบบถามทีละข้อ ----------
   const YN = [{ l: 'ใช่', v: true }, { l: 'ไม่ใช่', v: false }];
   const STEPS = [
     { k: 'bleedingHeavy', q: 'เลือดออกมากจนชุ่มผ้าอนามัยภายใน 1 ชั่วโมงหรือไม่?', o: YN },
@@ -180,25 +204,25 @@
     { k: 'milk', q: 'น้ำนมเพียงพอไหม?', o: [{ l: 'เพียงพอ', v: 'enough' }, { l: 'น้อย', v: 'low' }, { l: 'ยังไม่มีน้ำนม', v: 'none' }] },
     { k: 'selfHarm', q: 'ช่วงนี้เคยคิดทำร้ายตัวเองหรือรู้สึกไม่อยากมีชีวิตอยู่หรือไม่?', o: YN },
   ];
-  let ans, step, started, finished, aiHistory;
+  let ans, step, triage, aiHistory;
   const log = $('#log'), quick = $('#quick');
   const say = (t, who = 'bot') => { const d = document.createElement('div'); d.className = 'msg ' + who; d.textContent = t; log.appendChild(d); log.scrollTop = log.scrollHeight; return d; };
+  const chip = (t, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.onclick = fn; if (cls) b.className = cls; quick.appendChild(b); return b; };
+  const homeChips = () => { quick.innerHTML = ''; chip('🩺 เริ่มคัดกรองอาการ', startTriage); ['ปวดหลัง', 'น้ำนมน้อย', 'คัดเต้านม', 'แผลผ่าคลอด', 'นอนไม่หลับ'].forEach(t => chip(t, () => ask(t))); };
   function resetChat() {
     ans = { days: me ? me.days : 0, delivery: me ? me.deliveryMode : 'vaginal', bleeding: 'normal', tempC: 36.8, pain: 0, milk: 'enough' };
-    step = 0; started = false; finished = false; aiHistory = []; log.innerHTML = ''; quick.innerHTML = '';
-    say('สวัสดีค่ะ น้องหมอท้องเอง 🤱 ไม่ใช่แพทย์ แต่ช่วยคัดกรองและบอกได้ว่าเมื่อไรควรพบบุคลากร\nเล่าอาการได้เลย เช่น “ปวดหลังมาก” หรือพิมพ์ “เริ่ม” เพื่อตอบคำถามคัดกรอง');
+    step = 0; triage = false; aiHistory = []; log.innerHTML = '';
+    say('สวัสดีค่ะ น้องหมอท้องเอง 🤱 ไม่ใช่แพทย์ แต่ตอบข้อสงสัยทั่วไปและช่วยคัดกรองได้\nพิมพ์ถามได้เลย เช่น “ปวดหลังทำไงดี” “กินขิงได้ไหม” หรือกดเริ่มคัดกรองอาการ');
+    homeChips();
   }
-  function parseFree(text) {
-    if (/ปวด/.test(text) && !ans.pain) ans.pain = 5;
-    if (/ไข้/.test(text)) ans.tempC = 38.2;
-    if (/เลือด(ออก)?มาก|ตกเลือด/.test(text)) ans.bleeding = 'heavy';
-  }
+  function startTriage() { ans = { ...ans, bleeding: 'normal', tempC: 36.8, pain: 0, milk: 'enough' }; step = 0; triage = true; say('เริ่มคัดกรองอาการนะคะ ตอบทีละข้อ', 'bot'); nextQuestion(); }
   function nextQuestion() {
     while (step < STEPS.length && STEPS[step].k === 'woundProblem' && ans.delivery !== 'cesarean') step++;
     if (step >= STEPS.length) return finishChat();
     const s = STEPS[step];
     say(s.q); quick.innerHTML = '';
-    s.o.forEach(o => { const b = document.createElement('button'); b.type = 'button'; b.textContent = o.l; b.onclick = () => answer(s, o); quick.appendChild(b); });
+    s.o.forEach(o => chip(o.l, () => answer(s, o)));
+    chip('ยกเลิกคัดกรอง', () => { triage = false; say('ยกเลิกการคัดกรองแล้วค่ะ ถามต่อได้เลย'); homeChips(); }, 'ghost');
   }
   function answer(s, o) {
     say(o.l, 'me');
@@ -210,51 +234,78 @@
     nextQuestion();
   }
   function finishChat() {
-    quick.innerHTML = ''; finished = true;
+    triage = false; quick.innerHTML = '';
     const r = risk.assess(ans), t = ttm.recommend(ans, r);
     const lines = [`ผลคัดกรองเบื้องต้น: ${r.icon} ${r.label} (${r.th})`, ...r.reasons.map(x => '• ' + x.text), '', 'แนวทาง: ' + r.action];
     if (r.level === 'red') lines.push('', '🚨 โปรดโทร 1669 หรือไปโรงพยาบาลทันที ระบบหยุดให้คำแนะนำทั่วไปและแจ้งเจ้าหน้าที่ให้ติดตาม');
-    else if (r.level === 'green' || r.level === 'yellow') {
+    else if (r.level === 'green' || r.level === 'yellow' || r.ttmOnly) {
       lines.push('', 'คำแนะนำดูแลตนเอง: พักผ่อนให้เพียงพอ ดื่มน้ำ ให้นมตามต้องการของลูก สังเกตเลือดออก ไข้ และอาการปวดต่อเนื่อง');
       const c = t.items.filter(i => i.status === 'consider').map(i => '• ' + i.name);
       if (c.length) lines.push('', 'บริการแพทย์แผนไทยที่อาจพิจารณา (ต้องให้แพทย์แผนไทยประเมินและยืนยันก่อน):', ...c);
     } else lines.push('', 'ยังไม่แนะนำหัตถการใด ๆ จนกว่าบุคลากรจะประเมิน');
     if (ans.selfHarm) lines.push('', 'สายด่วนสุขภาพจิต 1323 (24 ชม.)');
-    if (kb.aiEnabled && r.level !== 'red') lines.push('', 'มีคำถามอื่น พิมพ์ถามน้องหมอท้องได้เลยค่ะ');
+    lines.push('', 'มีคำถามอื่น พิมพ์ถามได้เลยค่ะ');
     say(lines.join('\n'));
     if (me && me.days >= 1) api('POST', '/api/patient/assessment', { input: ans, source: 'chat' }).then(() => Promise.all([loadHistory(), loadNotifs()])).catch(() => {});   // ส่งผลคัดกรองให้เจ้าหน้าที่เห็น
-    const mk = (t, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.onclick = fn; if (cls) b.className = cls; quick.appendChild(b); };
-    if (r.referral === 'hospital' || r.referral === 'both') mk('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h');
-    if (r.referral === 'ttm' || r.referral === 'both') mk('📍 คลินิกแพทย์แผนไทยใกล้ฉัน', () => openNearby('ttm'), 'mapbtn');
-    mk('เริ่มใหม่', resetChat);
+    if (r.referral === 'hospital' || r.referral === 'both') chip('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h');
+    if (r.referral === 'ttm' || r.referral === 'both') chip('📍 คลินิกแพทย์แผนไทยใกล้ฉัน', () => openNearby('ttm'), 'mapbtn');
+    chip('คัดกรองใหม่', startTriage); chip('ถามเรื่องอื่น', homeChips);
   }
-  $('#chatform').addEventListener('submit', async (e) => {
+  let asking = false;
+  async function ask(text) {
+    say(text, 'me');
+    if (/^(เริ่ม|คัดกรอง|ประเมินอาการ)/.test(text.replace(/\s+/g, '')) ) return startTriage();
+    if (asking) return;
+    asking = true; const wait = say('กำลังคิด...');
+    try {
+      const r = await api('POST', '/api/patient/chat', { message: text, history: aiHistory });
+      wait.textContent = r.reply;
+      if (r.source === 'ai') aiHistory.push({ role: 'user', content: text }, { role: 'assistant', content: r.reply });
+      if (r.referral) { chip('📍 โรงพยาบาลใกล้ฉัน', () => openNearby('hospital'), 'mapbtn h'); }
+      else if (r.suggest) { quick.innerHTML = ''; chip('🩺 เริ่มคัดกรองอาการ', startTriage); r.suggest.forEach(t => chip(t, () => ask(t))); }
+      else if (!triage) { if (!quick.querySelector('.mapbtn')) { homeChips(); } }
+    } catch (er) { wait.textContent = er.message; }
+    finally { asking = false; log.scrollTop = log.scrollHeight; }
+  }
+  $('#chatform').addEventListener('submit', (e) => {
     e.preventDefault();
     const v = $('#chatin').value.trim(); if (!v) return;
     $('#chatin').value = '';
-    say(v, 'me');
-    if (!started && !finished) { started = true; parseFree(v); return nextQuestion(); }
-    if (!finished) return say('กรุณาเลือกคำตอบจากปุ่มด้านล่าง เพื่อให้คัดกรองได้แม่นยำ');
-    if (!kb.aiEnabled) return say('ตอนนี้ยังไม่เปิดให้ถามตอบอิสระ หากมีข้อสงสัยกรุณาติดต่อเจ้าหน้าที่ค่ะ');
-    const wait = say('กำลังคิด...');
-    try {
-      const r = await api('POST', '/api/patient/chat', { message: v, history: aiHistory });
-      wait.textContent = r.reply;
-      if (!r.referral) aiHistory.push({ role: 'user', content: v }, { role: 'assistant', content: r.reply });
-    } catch (er) { wait.textContent = er.message; }
+    ask(v);                                                           // ถามได้ตลอดเวลา แม้อยู่ระหว่างคัดกรอง (ปุ่มคำถามคัดกรองยังอยู่)
   });
 
-  // ---------- Herbal checker (ฐานข้อมูลจากผู้ดูแลระบบ; ถ้ายังไม่มีใช้ชุดตัวอย่าง) ----------
+  // ---------- Herbal checker: ค้นหาหรือเลือกจากรายการ (ยา · สมุนไพร · อาหารเสริม · อาหาร) ----------
+  const CAT = { medicine: 'ยา', herb: 'สมุนไพร', supplement: 'อาหารเสริม', food: 'อาหาร' };
+  const herbq = $('#herbq'), opts = $('#herbopts');
+  function renderOpts(filter = '') {
+    const q = filter.trim().toLowerCase();
+    const list = herbs.DB.filter(h => !q || [h.name, ...(h.aliases || [])].some(k => k.toLowerCase().includes(q)));
+    let html = '';
+    for (const c of ['medicine', 'herb', 'supplement', 'food']) {
+      const g = list.filter(h => (h.category || 'herb') === c); if (!g.length) continue;
+      html += `<li class="grp" role="presentation">${CAT[c]}</li>` + g.map(h => `<li role="option" tabindex="-1" data-name="${esc(h.name)}">${esc(h.name)}${h.baseline === 'consult' ? ' <small>ควรปรึกษา</small>' : ''}${h.src === 'demo' ? ' <small class="demo">ตัวอย่าง</small>' : ''}</li>`).join('');
+    }
+    if (!html) html = `<li class="none" role="presentation">ไม่พบ “${esc(filter)}” ในรายการ — กด “ตรวจสอบ” ระบบจะแจ้งให้ปรึกษาบุคลากร</li>`;
+    opts.innerHTML = html;
+  }
+  const openOpts = (on) => { opts.hidden = !on; herbq.setAttribute('aria-expanded', String(on)); if (on) renderOpts(herbq.value); };
+  herbq.addEventListener('focus', () => openOpts(true));
+  herbq.addEventListener('input', () => openOpts(true));
+  $('#herbtoggle').addEventListener('click', () => { if (opts.hidden) { herbq.focus(); openOpts(true); } else openOpts(false); });
+  opts.addEventListener('mousedown', e => e.preventDefault());           // keep input focus while tapping an option
+  opts.addEventListener('click', e => { const li = e.target.closest('li[data-name]'); if (!li) return; herbq.value = li.dataset.name; openOpts(false); $('#herbform').requestSubmit(); });
+  document.addEventListener('click', e => { if (!e.target.closest('#combo')) openOpts(false); });
+  herbq.addEventListener('keydown', e => { if (e.key === 'Escape') openOpts(false); });
   $('#herbform').addEventListener('submit', e => {
-    e.preventDefault();
+    e.preventDefault(); openOpts(false);
     const f = e.target, profile = {};
     for (const el of f.elements) if (el.type === 'checkbox') profile[el.name] = el.checked;
-    const r = herbs.check($('#herbq').value, profile);
+    const r = herbs.check(herbq.value, profile);
     const cls = { ok: 'b-green', consult: 'b-yellow', avoid: 'b-red' }[r.verdict];
     const icon = { ok: '✅', consult: '⚠️', avoid: '⛔' }[r.verdict];
-    $('#herbres').innerHTML = `<h2>${esc(r.herb ? r.herb.name : $('#herbq').value || '—')}</h2><p><span class="badge ${cls}">${icon} ${r.th}</span></p>
+    $('#herbres').innerHTML = `<h2>${esc(r.herb ? r.herb.name : herbq.value || '—')}</h2><p><span class="badge ${cls}">${icon} ${r.th}</span></p>
       <ul class="reasons">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
-      <p class="muted">ผลจากฐานข้อมูลที่ตรวจสอบโดยผู้เชี่ยวชาญ ไม่ใช่การวินิจฉัย — หากไม่แน่ใจโปรดปรึกษาเจ้าหน้าที่</p>`;
+      <p class="muted">${r.herb && r.herb.src === 'demo' ? 'ข้อมูลตัวอย่างของระบบ ยังไม่ได้ตรวจสอบโดยผู้เชี่ยวชาญ — ' : 'ตามข้อมูลที่ผู้ดูแลระบบบันทึกไว้ · '}ไม่ใช่การวินิจฉัย หากไม่แน่ใจโปรดปรึกษาเจ้าหน้าที่</p>`;
   });
 
   // ---------- Follow-up timeline + alerts ----------
@@ -328,8 +379,10 @@
 
   // ---------- Knowledge ----------
   function renderKnowledge() {
-    if (kb.herbs.length) herbs.DB = kb.herbs; else herbs.DB = herbs.BUILTIN;
-    $('#herblist').innerHTML = herbs.DB.map(h => `<option value="${esc(h.name)}">`).join('');
+    // รายการที่ผู้ดูแลระบบบันทึก (ใช้ก่อน) + รายการตัวอย่างของระบบ (ที่ชื่อไม่ซ้ำ) เพื่อให้ dropdown มีตัวเลือกพอ
+    const mine = new Set(kb.herbs.map(h => h.name));
+    herbs.DB = [...kb.herbs.map(h => ({ ...h, src: 'admin' })), ...herbs.BUILTIN.filter(h => !mine.has(h.name)).map(h => ({ ...h, src: 'demo' }))];
+    renderOpts(herbq.value);
     const V = { true: ['✅', 'เชื่อได้', 'b-green'], false: ['⛔', 'เชื่อไม่ได้', 'b-red'], unclear: ['⚠️', 'ไม่แน่ชัด', 'b-yellow'] };
     $('#mythlist').innerHTML = kb.myths.map(m => `<details class="card kbi"><summary><b>${esc(m.title)}</b> <span class="badge ${V[m.verdict][2]}">${V[m.verdict][0]} ${V[m.verdict][1]}</span></summary><p>${esc(m.body)}</p></details>`).join('');
     $('#liblist').innerHTML = kb.library.map(l => `<details class="card kbi"><summary><b>${esc(l.title)}</b>${l.category ? ` <span class="muted">${esc(l.category)}</span>` : ''}</summary><p>${esc(l.body)}</p></details>`).join('');

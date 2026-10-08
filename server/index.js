@@ -49,6 +49,20 @@ function fullName(raw) {
   return `${n} ${SURNAMES[h % SURNAMES.length]}`;
 }
 
+// ---- build fingerprints: ใช้ตรวจว่าเบราว์เซอร์/เซิร์ฟเวอร์ใช้โค้ดเวอร์ชันเดียวกับไฟล์ปัจจุบันหรือไม่ ----
+function walk(dir, skip, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) { if (!skip(f)) walk(f, skip, out); } else if (/\.(js|css|html)$/.test(e.name)) out.push(f);
+  }
+  return out.sort();
+}
+function fingerprint(files) { const h = crypto.createHash('sha1'); for (const f of files) { h.update(f); h.update(fs.readFileSync(f)); } return h.digest('hex').slice(0, 8); }
+let fpCache = {};
+function cachedFp(key, compute) { const now = Date.now(); const c = fpCache[key]; if (c && now - c.t < 3000) return c.v; const v = compute(); fpCache[key] = { t: now, v }; return v; }
+const webBuild = () => cachedFp('web', () => fingerprint(walk(WEB, d => /[\\/]vendor$|[\\/]img$/.test(d))));
+const serverBuildNow = () => cachedFp('srv', () => fingerprint([...walk(path.join(__dirname), () => false), path.join(WEB, 'risk-engine.js')]));
+
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = (msg, status = 400) => { throw new HttpError(status, msg); };
 
@@ -80,6 +94,7 @@ function send(res, status, body, headers = {}) {
 async function createApp({ dataDir }) {
   const S = await storeLib.open(dataDir);
   const { db } = S;
+  const BOOT_SERVER_BUILD = serverBuildNow();      // รหัสโค้ดฝั่งเซิร์ฟเวอร์ ณ ตอนเริ่มทำงาน
   const todayStr = () => (db.settings.demo && db.settings.demo.today) || bkkToday();
   const daysSince = (d) => Math.floor((Date.parse(todayStr()) - Date.parse(d)) / 86400e3);     // D0 = วันคลอด, D1 = วันถัดไป
   const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && v >= '2000-01-01' && v <= addDays(todayStr(), 300);
@@ -159,7 +174,7 @@ async function createApp({ dataDir }) {
     setCookie(ctx.req, ctx.res, 'pat_sid', token, 2 * 3600);
     S.audit('patient:' + p.hn, 'login');
   }
-  route('GET', '/api/public/config', null, () => ({ testMode: testOn(), today: todayStr(), scan: scanOn() }));
+  route('GET', '/api/public/config', null, () => ({ testMode: testOn(), today: todayStr(), scan: scanOn(), build: webBuild(), server: BOOT_SERVER_BUILD, serverDisk: serverBuildNow() }));
   route('POST', '/api/patient/identify', null, (ctx) => {
     if (testOn()) {          // โหมดผู้ใช้ทดสอบ: HN/ชื่ออะไรก็ได้ → ถามวันที่คลอดต่อ (ผ่านหมด)
       const ident = str(ctx.body.id, 30).replace(/[\u0000-\u001f<>]/g, ''), nm = str(ctx.body.namePart, 60);
@@ -584,9 +599,15 @@ async function createApp({ dataDir }) {
     fs.readFile(file, (err, buf) => {
       if (err) return send(res, 404, { error: 'not found' });
       const ext = path.extname(file).toLowerCase();
-      const immutable = rel.startsWith('/vendor/') || rel.startsWith('/img/');
+      const heavy = rel.startsWith('/vendor/') || rel.startsWith('/img/');
+      if (ext === '.html') {                       // ใส่รหัสเวอร์ชันต่อท้ายไฟล์ .js/.css ของแอป + meta build เพื่อกัน cache เก่า (เบราว์เซอร์/Cloudflare)
+        const v = webBuild();
+        buf = Buffer.from(buf.toString('utf8')
+          .replace(/(src|href)="([^"]+\.(?:js|css))"/g, (m, a, u) => (/^(https?:)?\/\//.test(u) || /vendor\//.test(u) ? m : `${a}="${u}?v=${v}"`))
+          .replace('<head>', `<head>\n<meta name="build" content="${v}">`));
+      }
       res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
-        'Cache-Control': immutable ? 'public, max-age=86400' : 'no-cache', 'Permissions-Policy': 'camera=(self), microphone=(self)' });
+        'Cache-Control': heavy ? 'public, max-age=86400' : 'no-store, max-age=0', 'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=(self)' });
       res.end(buf);
     });
   }

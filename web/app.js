@@ -33,10 +33,17 @@
   // ---------- Login: step 1 (HN or phone + part of name) → step 2 (live face scan, no upload) ----------
   const login = $('#login'), lform = $('#lform');
   let scanner = null, mockMode = false, livenessOn = true, cfg = { testMode: false, today: null };
-  fetch('/api/public/config').then(r => r.json()).then(c => { cfg = c; $('#ltest').hidden = !c.testMode; }).catch(() => {});
+  // ตรวจเวอร์ชัน: ถ้าหน้านี้ถูก cache เป็นเวอร์ชันเก่า (ไม่ตรงกับเซิร์ฟเวอร์) ให้รีโหลดตัวเองหนึ่งครั้ง
+  const myBuild = (document.querySelector('meta[name=build]') || {}).content;
+  const checkBuild = (c) => {
+    const el = $('#lbuild'); if (el) el.textContent = c.build ? 'v' + c.build : '';
+    if (c.build && myBuild && c.build !== myBuild) { try { if (sessionStorage.getItem('pnc-reloaded') === c.build) return; sessionStorage.setItem('pnc-reloaded', c.build); } catch (_) { /* private mode */ } location.reload(); }
+  };
+  const loadCfg = () => fetch('/api/public/config', { cache: 'no-store' }).then(r => r.json()).then(c => { cfg = c; $('#ltest').hidden = !c.testMode; checkBuild(c); }).catch(() => {});
+  loadCfg();
   function showLogin(msg) { stopScan(); me = null; login.hidden = false; $('#bottom').hidden = true; $$('.view').forEach(v => v.classList.remove('on')); stepOne(msg); }
   function stopScan() { if (scanner) { scanner.cancel(); scanner = null; } }
-  function stepOne(msg) { stopScan(); login.classList.remove('scanning'); lform.hidden = false; $('#lstep2').hidden = true; $('#lprofile').hidden = true; fetch('/api/public/config').then(r => r.json()).then(c => { cfg = c; $('#ltest').hidden = !c.testMode; }).catch(() => {}); $('#lmsg').textContent = msg || ''; $('#lbtn').disabled = false; }
+  function stepOne(msg) { stopScan(); login.classList.remove('scanning'); lform.hidden = false; $('#lstep2').hidden = true; $('#lprofile').hidden = true; loadCfg(); $('#lmsg').textContent = msg || ''; $('#lbtn').disabled = false; }
   async function stepTwo() {
     lform.hidden = true; login.classList.add('scanning'); $('#lstep2').hidden = false; $('#lmsg2').textContent = ''; $('#lretry').hidden = true;
     stopScan(); scanner = mockMode ? PNCFace.mockScan($('#camwrap')) : PNCFace.liveScan($('#camwrap'), { liveness: livenessOn, timeoutMs: 60000 });

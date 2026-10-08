@@ -232,6 +232,19 @@ test('admin1 can reset admin2 to default (forces change again)', async () => {
   const j = jar(); assert.strictEqual((await call(j, 'POST', '/api/auth/login', { username: 'admin2', password: 'admin1234' })).data.mustChange, true);
 });
 
+test('cache safety: app files are never cached, asset URLs carry the build id, config exposes it', async () => {
+  const html = await fetch(base + '/'); const text = await html.text();
+  assert.match(html.headers.get('cache-control'), /no-store/);
+  const cfg = (await call(jar(), 'GET', '/api/public/config')).data;
+  assert.match(cfg.build, /^[0-9a-f]{8}$/);
+  assert.ok(text.includes(`<meta name="build" content="${cfg.build}">`));
+  assert.ok(text.includes(`app.js?v=${cfg.build}`) && text.includes(`styles.css?v=${cfg.build}`));
+  assert.ok(!/vendor\/[^"]*\?v=/.test(text));                                                  // vendor files are not re-versioned
+  for (const f of ['app.js', 'styles.css']) { const r = await fetch(`${base}/${f}?v=${cfg.build}`); assert.strictEqual(r.status, 200); assert.match(r.headers.get('cache-control'), /no-store/); }
+  assert.match((await fetch(base + '/admin/')).headers.get('cache-control'), /no-store/);
+  assert.ok((await (await fetch(base + '/staff/')).text()).includes('common.js?v='));
+  assert.strictEqual(cfg.server, cfg.serverDisk);                                               // running code == code on disk
+});
 test('static: app served, data dir and dotfiles are not, traversal blocked', async () => {
   assert.strictEqual((await call(jar(), 'GET', '/')).status, 200);
   assert.strictEqual((await call(jar(), 'GET', '/admin/')).status, 200);

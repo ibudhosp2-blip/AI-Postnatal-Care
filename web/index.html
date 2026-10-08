@@ -2,104 +2,246 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffe3e8">
 <title>หมอท้อง ; AI Thai Postnatal Care</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header>
-  <h1>หมอท้อง <span>; AI Thai Postnatal Care</span></h1>
-  <p class="tag">AI ไม่ได้วินิจฉัยแม่ แต่ AI รู้ว่าแม่ต้องการการดูแลอะไร และรู้ว่าเมื่อใดต้องส่งต่อให้คน</p>
-  <div class="demo-banner">ต้นแบบเพื่อสาธิต (Rule-based) — กฎและฐานข้อมูลยังไม่ผ่านการ validate ทางคลินิก ห้ามใช้ตัดสินใจรักษาจริง</div>
-  <nav id="tabs" role="tablist">
-    <button data-tab="assess" class="on">① ประเมิน (Passport)</button>
-    <button data-tab="chat">② AI หมอท้อง</button>
-    <button data-tab="dash">③ Dashboard บุคลากร</button>
-    <button data-tab="herb">④ ตรวจสมุนไพร</button>
-    <button data-tab="follow">⑤ ติดตามอัตโนมัติ</button>
-  </nav>
-</header>
-<main>
-  <section id="tab-assess">
-    <div class="grid2">
-      <form id="form" class="card" autocomplete="off">
-        <h2>สมุดสุขภาพหลังคลอดดิจิทัล</h2>
-        <div class="row">
-          <label>วันหลังคลอด<input type="number" name="days" min="0" max="60" value="10"></label>
-          <label>วิธีคลอด<select name="delivery"><option value="vaginal">ทางช่องคลอด</option><option value="cesarean">ผ่าตัดคลอด</option></select></label>
-          <label>เลือดออก/น้ำคาวปลา<select name="bleeding"><option value="normal">ปริมาณปกติ</option><option value="clots">มีลิ่มเลือดก้อนใหญ่/มากกว่าปกติ</option><option value="heavy">ชุ่มผ้าอนามัยเร็วมาก</option></select></label>
-        </div>
-        <div class="row">
-          <label>อุณหภูมิ (°C)<input type="number" name="tempC" step="0.1" value="36.8"></label>
-          <label>ความดัน บน<input type="number" name="sys" value="118"></label>
-          <label>ความดัน ล่าง<input type="number" name="dia" value="76"></label>
-          <label>ระดับปวด 0–10<input type="number" name="pain" min="0" max="10" value="4"></label>
-        </div>
-        <div class="row">
-          <label>น้ำนม<select name="milk"><option value="enough">เพียงพอ</option><option value="low">น้อย</option><option value="none">ยังไม่มี</option></select></label>
-          <label>EPDS (0–30)<input type="number" name="epds" min="0" max="30" value="6"></label>
-          <label>นอน (ชม./วัน)<input type="number" name="sleepHours" step="0.5" value="5"></label>
-        </div>
-        <fieldset><legend>อาการ/ประวัติ (ติ๊กถ้ามี)</legend>
-          <label class="ck"><input type="checkbox" name="chestOrBreath"> เจ็บหน้าอก/หายใจลำบาก</label>
-          <label class="ck"><input type="checkbox" name="seizure"> ชัก/หมดสติ</label>
-          <label class="ck"><input type="checkbox" name="headacheVision"> ปวดศีรษะรุนแรง/ตาพร่า</label>
-          <label class="ck"><input type="checkbox" name="selfHarm"> คิดทำร้ายตัวเอง</label>
-          <label class="ck"><input type="checkbox" name="foulLochia"> น้ำคาวปลามีกลิ่นเหม็น</label>
-          <label class="ck"><input type="checkbox" name="severeAbdPain"> ปวดท้องน้อยรุนแรง</label>
-          <label class="ck"><input type="checkbox" name="calfPain"> ปวด/บวมน่องข้างเดียว</label>
-          <label class="ck"><input type="checkbox" name="woundProblem"> แผลบวมแดง/มีหนอง</label>
-          <label class="ck"><input type="checkbox" name="breastRed"> เต้านมแดง ร้อน เจ็บ</label>
-          <label class="ck"><input type="checkbox" name="engorgement"> คัดตึงเต้านม</label>
-          <label class="ck"><input type="checkbox" name="hxPPH"> เคยตกเลือดหลังคลอด</label>
-        </fieldset>
-        <div class="presets">ตัวอย่าง: <button type="button" data-preset="green">ปกติ</button> <button type="button" data-preset="yellow">ควรติดตาม</button> <button type="button" data-preset="orange">เสี่ยง</button> <button type="button" data-preset="red">ฉุกเฉิน</button></div>
+<div id="app">
+
+  <!-- ========== เข้าสู่ระบบคนไข้ ========== -->
+  <section id="login" hidden>
+    <div class="lbox">
+      <img class="logo" src="img/logo.png" alt="">
+      <h1>หมอท้อง</h1>
+      <p class="sub">AI Thai Postnatal Care</p>
+      <form id="lform" autocomplete="off">
+        <label>HN หรือ เบอร์โทรศัพท์<input name="id" required maxlength="30" autocapitalize="characters" autocomplete="off" inputmode="text"></label>
+        <label>ชื่อของคุณ (บางส่วนก็ได้)<input name="namePart" required maxlength="60" autocomplete="off"></label>
+        <button class="primary" id="lbtn">ถัดไป</button>
+        <div id="lmsg" class="lmsg" role="alert"></div>
       </form>
-      <div id="result" class="card"></div>
+      <div id="lstep2" class="lcam" hidden>
+        <h2>สแกนใบหน้า</h2>
+        <p class="muted">มองตรงที่กล้อง แล้วกะพริบตา 1 ครั้ง (สแกนสดจากกล้อง ไม่มีการอัปโหลดรูป)</p>
+        <div id="camwrap"></div>
+        <div id="lmsg2" class="lmsg" role="alert"></div>
+        <div class="row" style="justify-content:center;gap:8px;display:flex"><button class="primary alt" id="lretry" type="button" hidden>ลองอีกครั้ง</button><button class="primary alt" id="lback" type="button">ย้อนกลับ</button></div>
+      </div>
+      <p class="muted" style="text-align:center">ไม่มี HN หรือเข้าไม่ได้ กรุณาติดต่อเจ้าหน้าที่</p>
     </div>
   </section>
 
-  <section id="tab-chat" hidden>
+  <!-- ========== หน้าแรก ========== -->
+  <section class="view on" id="v-home">
+    <header class="hero">
+      <img class="logo" src="img/logo.png" alt="">
+      <div class="htxt">
+        <h1>หมอท้อง</h1>
+        <p class="sub">AI Thai Postnatal Care</p>
+        <p class="desc">ระบบอัจฉริยะเชื่อมโยงการดูแลมารดาหลังคลอด แบบบูรณาการตามศาสตร์การแพทย์แผนไทย</p>
+      </div>
+      <div class="hacts">
+        <button class="hbtn" data-go="alerts" aria-label="แจ้งเตือน"><svg viewBox="0 0 24 24"><path d="M12 22a2.4 2.4 0 0 0 2.4-2.4h-4.8A2.4 2.4 0 0 0 12 22zm7-6V11a7 7 0 0 0-5-6.7V3a2 2 0 0 0-4 0v1.3A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg><b class="bdg" id="hbell" hidden></b></button>
+        <button class="hbtn" data-go="me" aria-label="บัญชีของฉัน"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"/></svg></button>
+      </div>
+    </header>
+
+    <div class="stage">
+      <img class="mother" src="img/mother.png" alt="">
+      <div class="mascot" id="mascot" role="button" tabindex="0" aria-label="คุยกับน้องหมอท้อง">
+        <img src="img/bot.png" alt="" class="bot">
+        <span class="chip">น้องหมอท้อง</span>
+        <button id="mic" class="mic" aria-label="พูดกับน้องหมอท้อง">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="#fff"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12h-2z"/></svg>
+        </button>
+      </div>
+    </div>
+    <p class="pill">ต้นแบบเพื่อสาธิต · ไม่ใช่คำแนะนำทางการแพทย์</p>
+    <p class="dchip" id="dchip" hidden></p>
+
+    <div class="card gcard">
+      <div class="chead"><span class="cico"><svg viewBox="0 0 24 24" fill="#fff"><path d="M5 12h3v8H5zm5-6h3v14h-3zm5 3h3v11h-3z"/></svg></span><h2>กราฟแสดงระดับความเสี่ยงหลังคลอด</h2></div>
+      <div class="chart-wrap">
+        <div class="legend">
+          <small>ระดับความเสี่ยง<br>หลังคลอด</small>
+          <span class="lg g"><i>✓</i>ปกติ</span><span class="lg y"><i>◷</i>ต้องติดตาม</span><span class="lg o"><i>!</i>เสี่ยง</span><span class="lg r"><i>!</i>รุนแรง<em>(รีบพบแพทย์)</em></span>
+        </div>
+        <div class="chart" data-chart></div>
+      </div>
+      <div class="chead2"><button class="link" data-go="history">📅 ดูรายละเอียด ›</button><small class="wk">ส. = สัปดาห์</small></div>
+    </div>
+
+    <div class="tiles">
+      <button data-go="birth" style="--tb:#fef4f2"><img src="img/t1.png" alt=""><span>ข้อมูลการคลอด</span></button>
+      <button data-go="assess" style="--tb:#fef2f3"><img src="img/t2.png" alt=""><span>ติดตามและประเมินอาการหลังคลอด</span></button>
+      <button data-go="follow" style="--tb:#fef7ef"><img src="img/t3.png" alt=""><span>หลักการดูแลหลังคลอด</span></button>
+      <button data-go="herb" class="leaf" style="--tb:#f6f9ee"><img src="img/t4.png" alt=""><span>การใช้สมุนไพรให้ปลอดภัย</span></button>
+      <button class="soon" id="tile-library" style="--tb:#faf0fb" data-go="library"><img src="img/t5.png" alt=""><span>คลังความรู้การผดุงครรภ์</span><em>เร็ว ๆ นี้</em></button>
+      <button class="soon" id="tile-myths" style="--tb:#fdf5ec" data-go="myths"><img src="img/t6.png" alt=""><span>โบราณเชื่อได้ไหม</span><em>เร็ว ๆ นี้</em></button>
+    </div>
+  </section>
+
+  <!-- ========== ข้อมูลการคลอด ========== -->
+  <section class="view" id="v-birth">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>ข้อมูลการคลอด</h2></div>
+    <div class="card">
+      <dl class="kv"><dt>HN</dt><dd id="b-hn">-</dd><dt>ชื่อ</dt><dd id="b-name">-</dd><dt>วันคลอด</dt><dd id="b-date">-</dd><dt>หลังคลอด</dt><dd id="b-days">-</dd><dt>ลักษณะการคลอด</dt><dd id="b-mode">-</dd><dt>อายุ</dt><dd id="b-age">-</dd><dt>อายุครรภ์</dt><dd id="b-ga">-</dd><dt>สิทธิ์การรักษา</dt><dd id="b-cov">-</dd></dl>
+      <p class="muted">ข้อมูลนี้บันทึกโดยเจ้าหน้าที่ หากไม่ถูกต้องกรุณาแจ้งเจ้าหน้าที่</p>
+    </div>
+  </section>
+
+  <!-- ========== ประเมินอาการ ========== -->
+  <section class="view" id="v-assess">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>ประเมินอาการ</h2></div>
+    <div id="levelbar" class="levelbar"></div>
+    <div class="card" id="dayrow"><label>ประเมินของวัน<select id="forDay"></select></label><div id="assessInfo" class="muted"></div></div>
+    <form id="form" class="card" autocomplete="off">
+      <div class="row">
+        <label>วันหลังคลอด<input type="number" name="days" value="0" readonly></label>
+        <label>วิธีคลอด<select name="delivery" disabled><option value="vaginal">ทางช่องคลอด</option><option value="cesarean">ผ่าตัดคลอด</option></select></label>
+      </div>
+      <div class="row">
+        <label>เลือดออก<select name="bleeding"><option value="normal">ปกติ</option><option value="clots">มีลิ่มเลือด</option><option value="heavy">มากผิดปกติ</option></select></label>
+        <label>น้ำนม<select name="milk"><option value="enough">เพียงพอ</option><option value="low">น้อย</option><option value="none">ยังไม่มี</option></select></label>
+      </div>
+      <div class="row">
+        <label>อุณหภูมิ °C<input type="number" name="tempC" step="0.1" inputmode="decimal" placeholder="36.8"></label>
+        <label>ปวด 0–10<input type="number" name="pain" min="0" max="10" value="0" inputmode="numeric"></label>
+      </div>
+      <div class="row">
+        <label>ความดันบน<input type="number" name="sys" inputmode="numeric" placeholder="118"></label>
+        <label>ความดันล่าง<input type="number" name="dia" inputmode="numeric" placeholder="76"></label>
+      </div>
+      <div class="row">
+        <label>EPDS 0–30<input type="number" name="epds" min="0" max="30" inputmode="numeric" placeholder="0–30"></label>
+        <label>นอน ชม./วัน<input type="number" name="sleepHours" step="0.5" inputmode="decimal" placeholder="5"></label>
+      </div>
+      <fieldset><legend>มีอาการเหล่านี้ไหม</legend>
+        <label class="ck"><input type="checkbox" name="chestOrBreath"> เจ็บหน้าอก/หายใจลำบาก</label>
+        <label class="ck"><input type="checkbox" name="seizure"> ชัก/หมดสติ</label>
+        <label class="ck"><input type="checkbox" name="headacheVision"> ปวดหัวมาก/ตาพร่า</label>
+        <label class="ck"><input type="checkbox" name="selfHarm"> คิดทำร้ายตัวเอง</label>
+        <label class="ck"><input type="checkbox" name="foulLochia"> น้ำคาวปลาเหม็น</label>
+        <label class="ck"><input type="checkbox" name="severeAbdPain"> ปวดท้องน้อยมาก</label>
+        <label class="ck"><input type="checkbox" name="calfPain"> ปวด/บวมน่องข้างเดียว</label>
+        <label class="ck"><input type="checkbox" name="woundProblem"> แผลบวมแดง/หนอง</label>
+        <label class="ck"><input type="checkbox" name="breastRed"> เต้านมแดง ร้อน เจ็บ</label>
+        <label class="ck"><input type="checkbox" name="engorgement"> คัดตึงเต้านม</label>
+        <label class="ck"><input type="checkbox" name="hxPPH"> เคยตกเลือดหลังคลอด</label>
+      </fieldset>
+    </form>
+    <div id="result" class="card"></div>
+    <button class="primary" id="saveAssess" type="button">บันทึกผลให้เจ้าหน้าที่</button><div id="saveMsg" class="muted" style="margin:8px 0 14px;text-align:center"></div>
+  </section>
+
+  <!-- ========== AI หมอท้อง ========== -->
+  <section class="view" id="v-chat">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>AI หมอท้อง</h2></div>
     <div class="card chat">
-      <h2>AI หมอท้อง — ถามต่อก่อนตอบ จัดระดับความเสี่ยงก่อนให้คำแนะนำ</h2>
       <div id="log" aria-live="polite"></div>
       <div id="quick"></div>
-      <form id="chatform"><input id="chatin" placeholder="เช่น หลังคลอด 10 วัน ปวดหลังมาก ทำอย่างไรดี?"><button>ส่ง</button></form>
+      <form id="chatform"><input id="chatin" placeholder="พิมพ์อาการ เช่น ปวดหลังมาก"><button aria-label="ส่ง">➤</button></form>
     </div>
   </section>
 
-  <section id="tab-dash" hidden>
-    <div id="dash"></div>
+  <!-- ========== ติดตามผล ========== -->
+  <section class="view" id="v-follow">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>หลักการดูแลหลังคลอด</h2></div>
+    <div class="card alertcard"><h2>🚨 สัญญาณอันตราย รีบไปโรงพยาบาล/โทร 1669</h2><ul class="reasons"><li>เลือดออกมาก ชุ่มผ้าอนามัยเร็ว</li><li>เจ็บหน้าอก หายใจลำบาก ชัก หมดสติ</li><li>ปวดหัวมาก ตาพร่า ความดันสูง</li><li>ไข้ ร่วมกับปวดท้อง/น้ำคาวปลาเหม็น</li><li>คิดทำร้ายตัวเอง (สายด่วน 1323)</li></ul></div>
+    <div class="card"><h2>การติดตามหลังกลับบ้าน</h2><div id="timeline"></div></div>
   </section>
 
-  <section id="tab-herb" hidden>
-    <div class="grid2">
-      <form id="herbform" class="card">
-        <h2>AI Herbal Safety Checker</h2>
-        <label>ชื่อสมุนไพร/ผลิตภัณฑ์ (ต้นแบบนี้ยังไม่รองรับถ่ายภาพฉลาก)<input id="herbq" placeholder="เช่น ขิง, ขมิ้นชัน, ยาขับน้ำคาวปลา" list="herblist"></label>
-        <datalist id="herblist"></datalist>
-        <fieldset><legend>ข้อมูลของมารดา</legend>
-          <label class="ck"><input type="checkbox" name="breastfeeding" checked> ให้นมบุตร</label>
-          <label class="ck"><input type="checkbox" name="hxPPH"> เคยตกเลือดหลังคลอด</label>
-          <label class="ck"><input type="checkbox" name="bleeding"> เลือดออกผิดปกติ</label>
-          <label class="ck"><input type="checkbox" name="htn"> ความดันโลหิตสูง</label>
-          <label class="ck"><input type="checkbox" name="anticoag"> ใช้ยาต้านการแข็งตัวของเลือด</label>
-        </fieldset>
-        <button>ตรวจสอบ</button>
-        <p class="muted">ผลตัดสินจากกฎในฐานข้อมูล ไม่ใช้ Generative AI ตัดสินความปลอดภัย · ไม่พบในฐานข้อมูล = ควรปรึกษาบุคลากร</p>
-      </form>
-      <div id="herbres" class="card"><p class="muted">กรอกชื่อผลิตภัณฑ์แล้วกด “ตรวจสอบ”</p></div>
+  <!-- ========== สมุนไพรปลอดภัย ========== -->
+  <section class="view" id="v-herb">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>สมุนไพรปลอดภัย</h2></div>
+    <form id="herbform" class="card">
+      <label>ชื่อสมุนไพร/ผลิตภัณฑ์<input id="herbq" placeholder="เช่น ขิง, ขมิ้นชัน" list="herblist"></label>
+      <datalist id="herblist"></datalist>
+      <fieldset><legend>ข้อมูลของคุณแม่</legend>
+        <label class="ck"><input type="checkbox" name="breastfeeding" checked> ให้นมบุตร</label>
+        <label class="ck"><input type="checkbox" name="hxPPH"> เคยตกเลือดหลังคลอด</label>
+        <label class="ck"><input type="checkbox" name="bleeding"> เลือดออกผิดปกติ</label>
+        <label class="ck"><input type="checkbox" name="htn"> ความดันสูง</label>
+        <label class="ck"><input type="checkbox" name="anticoag"> ใช้ยาละลายลิ่มเลือด</label>
+      </fieldset>
+      <button class="primary">ตรวจสอบ</button>
+    </form>
+    <div id="herbres" class="card"><p class="muted">กรอกชื่อแล้วกด “ตรวจสอบ”</p></div>
+  </section>
+
+  <!-- ========== ประวัติการดูแล ========== -->
+  <section class="view" id="v-history">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>ประวัติการดูแล</h2></div>
+    <div class="card"><div class="chart" data-chart="wide"></div><p class="muted">ข้อมูลตัวอย่าง · ส. = สัปดาห์</p></div>
+    <div class="card" id="histlist"></div>
+  </section>
+
+  <!-- ========== โบราณเชื่อได้ไหม ========== -->
+  <section class="view" id="v-myths">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>โบราณเชื่อได้ไหม</h2></div>
+    <div id="mythlist"></div>
+  </section>
+
+  <!-- ========== คลังความรู้ ========== -->
+  <section class="view" id="v-library">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>คลังความรู้การผดุงครรภ์</h2></div>
+    <div id="liblist"></div>
+  </section>
+
+  <!-- ========== แจ้งเตือน ========== -->
+  <section class="view" id="v-alerts">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>แจ้งเตือน</h2></div>
+    <div id="alertlist"></div>
+  </section>
+
+  <!-- ========== บัญชีของฉัน ========== -->
+  <section class="view" id="v-me">
+    <div class="topbar"><button class="back" data-go="home" aria-label="กลับ">‹</button><h2>บัญชีของฉัน</h2></div>
+    <div class="card me">
+      <div class="avatar">🤱</div>
+      <b id="me-name">-</b>
+      <span class="muted" id="me-sub">-</span>
     </div>
+    <button class="primary" id="logout" type="button">ออกจากระบบ</button>
+    <div class="card" style="margin-top:14px"><p class="muted">AI แนะนำ — บุคลากรตัดสินใจ<br>ข้อมูลของคุณถูกเก็บอย่างปลอดภัยและเจ้าหน้าที่ที่เกี่ยวข้องเท่านั้นที่เข้าถึงได้</p></div>
   </section>
 
-  <section id="tab-follow" hidden>
-    <div class="card"><h2>ระบบติดตามอัตโนมัติผ่าน LINE OA (ตัวอย่างข้อความ)</h2><p class="muted">คำตอบของมารดาจะถูกส่งเข้า Dashboard โดยตรง</p><div id="timeline"></div></div>
-  </section>
-</main>
-<footer>AI แนะนำ — บุคลากรตัดสินใจ · ข้อมูลในหน้านี้เป็นข้อมูลสมมติทั้งหมด ไม่มีการส่งข้อมูลออกจากเบราว์เซอร์</footer>
+  <div id="msgbox" hidden role="dialog" aria-modal="true" aria-labelledby="mb-title">
+    <div class="mbcard">
+      <div class="mbico">🔔</div>
+      <h2 id="mb-title"></h2><p id="mb-body"></p><p class="muted" id="mb-date"></p>
+      <button class="primary" id="mb-ack" type="button">รับทราบ</button>
+      <button class="primary alt" id="mb-map" type="button" style="margin-top:8px;width:100%">📍 หาคลินิกแพทย์แผนไทยใกล้ฉัน</button>
+      <button class="link" id="mb-close" type="button" style="margin-top:10px">ปิดไว้ก่อน</button>
+    </div>
+  </div>
+
+  <div id="placesheet" hidden role="dialog" aria-modal="true" aria-labelledby="ps-title">
+    <div class="mbcard psheet">
+      <h2 id="ps-title"></h2><p class="muted" id="ps-sub"></p>
+      <div id="ps-list"></div>
+      <button class="primary alt" id="ps-google" type="button" style="margin-top:10px;width:100%">ค้นหาเพิ่มเติมใน Google Maps</button>
+      <button class="link" id="ps-close" type="button" style="margin-top:10px">ปิด</button>
+    </div>
+  </div>
+
+  <nav id="bottom">
+    <button data-go="home" data-nav="home"><svg viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3z"/></svg><span>หน้าแรก</span></button>
+    <button data-go="history" data-nav="history"><svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 12h8v1.6H9zm0 4h8v1.6H9z"/></svg><span>ประวัติการดูแล</span></button>
+    <button data-go="alerts" data-nav="alerts"><svg viewBox="0 0 24 24"><path d="M12 22a2.4 2.4 0 0 0 2.4-2.4h-4.8A2.4 2.4 0 0 0 12 22zm7-6V11a7 7 0 0 0-5-6.7V3a2 2 0 0 0-4 0v1.3A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg><span>แจ้งเตือน</span><b class="dot" id="dot">1</b></button>
+    <button data-go="me" data-nav="me"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"/></svg><span>บัญชีของฉัน</span></button>
+  </nav>
+</div>
 <script src="risk-engine.js"></script>
 <script src="ttm.js"></script>
 <script src="herbs.js"></script>
+<script src="liveness.js"></script>
+<script src="face.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

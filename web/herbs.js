@@ -24,7 +24,7 @@
   function find(q) {
     const n = norm(q);
     if (!n) return null;
-    return DB.find(h => [h.name, ...h.aliases].some(k => n.includes(norm(k)) || norm(k).includes(n))) || null;
+    return api.DB.find(h => [h.name, ...h.aliases].some(k => n.includes(norm(k)) || norm(k).includes(n))) || null;
   }
 
   // profile: {breastfeeding, hxPPH, bleeding, htn, anticoag}
@@ -45,7 +45,7 @@
     return { verdict: 'ok', th: 'ใช้ได้ (ตามข้อมูลที่มี)', herb, reasons: [herb.note] };
   }
 
-  const api = { DB, check };
+  const api = { DB, BUILTIN: DB, check };
   root.PNC = Object.assign(root.PNC || {}, { herbs: api });
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

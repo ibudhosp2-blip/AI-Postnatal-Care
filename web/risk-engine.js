@@ -14,7 +14,7 @@
   function assess(input) {
     const a = input || {};
     const reasons = [];
-    const add = (level, text) => reasons.push({ level, text });
+    const add = (level, text, kind = 'medical') => reasons.push({ level, text, kind });
     const temp = num(a.tempC), pain = num(a.pain), sys = num(a.sys), dia = num(a.dia);
     const epds = num(a.epds), sleep = num(a.sleepHours);
 
@@ -41,14 +41,15 @@
     if (a.severeAbdPain) add('orange', 'ปวดท้องน้อยรุนแรง');
     if (a.woundProblem) add('orange', 'แผลบวม แดง มีหนอง/แยก');
     if (a.breastRed) add('orange', 'เต้านมแดง ร้อน เจ็บ สงสัยเต้านมอักเสบ');
+    // สีส้มกลุ่มที่แพทย์แผนไทยดูแลได้: คัดตึง/ปวดตึงเต้านม น้ำนมน้อย
+    if (a.engorgement) add('orange', 'คัดตึง/ปวดตึงเต้านม — แนะนำพบแพทย์แผนไทย', 'ttm');
+    if (a.milk === 'low' || a.milk === 'none') add('orange', 'น้ำนมไหลน้อย/ยังไม่มีน้ำนม — แนะนำพบแพทย์แผนไทย', 'ttm');
     if (pain != null && pain >= 7) add('orange', `ปวดรุนแรง (${pain}/10)`);
     if (epds != null && epds >= 13) add('orange', `คะแนนคัดกรองซึมเศร้าหลังคลอดสูง (EPDS ${epds})`);
 
     // ---- Yellow: ควรติดตาม ----
     if (pain != null && pain >= 4 && pain < 7) add('yellow', `ปวดปานกลาง (${pain}/10)`);
     if (epds != null && epds >= 10 && epds < 13) add('yellow', `คะแนน EPDS ${epds} ควรติดตามอารมณ์`);
-    if (a.milk === 'low' || a.milk === 'none') add('yellow', 'น้ำนมไม่เพียงพอ/ยังไม่มีน้ำนม');
-    if (a.engorgement) add('yellow', 'คัดตึงเต้านม');
     if (sleep != null && sleep < 4) add('yellow', `นอนน้อยมาก (${sleep} ชม./วัน)`);
     if (a.hxPPH && reasons.length === 0) add('yellow', 'มีประวัติตกเลือดหลังคลอด ควรเฝ้าระวังต่อเนื่อง');
 
@@ -56,12 +57,16 @@
     for (const r of reasons) if (LEVELS[r.level].rank > LEVELS[level].rank) level = r.level;
     if (!reasons.length) add('green', 'ไม่พบสัญญาณอันตรายจากข้อมูลที่ให้');
 
+    const orangeReasons = reasons.filter(r => r.level === 'orange');
+    const ttmOnly = level === 'orange' && orangeReasons.every(r => r.kind === 'ttm');
+    // referral: hospital = ไปโรงพยาบาล, ttm = คลินิกแพทย์แผนไทย, both = ให้บุคลากรประเมินโดยเร็ว + ตัวเลือกทั้งสอง
+    const referral = level === 'red' ? 'hospital' : level === 'orange' ? (ttmOnly ? 'ttm' : 'both') : null;
     const missing = [];
     if (sys == null || dia == null) missing.push('ความดันโลหิต');
     if (temp == null) missing.push('อุณหภูมิร่างกาย');
     if (epds == null) missing.push('แบบคัดกรองซึมเศร้า (EPDS)');
 
-    return { level, ...LEVELS[level], reasons: reasons.sort((x, y) => LEVELS[y.level].rank - LEVELS[x.level].rank), missing };
+    return { level, ...LEVELS[level], action: ttmOnly ? 'แนะนำพบแพทย์แผนไทย (กด GPS ดูคลินิกแพทย์แผนไทยใกล้ตัว)' : LEVELS[level].action, ttmOnly, referral, reasons: reasons.sort((x, y) => LEVELS[y.level].rank - LEVELS[x.level].rank), missing };
   }
 
   const api = { LEVELS, assess };

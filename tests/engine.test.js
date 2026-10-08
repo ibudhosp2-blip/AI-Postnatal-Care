@@ -16,9 +16,18 @@ test('fever alone is orange, fever + foul lochia is red', () => {
   assert.strictEqual(lvl({ tempC: 38.4 }), 'orange');
   assert.strictEqual(lvl({ tempC: 38.4, foulLochia: true }), 'red');
 });
-test('moderate pain / low milk is yellow', () => {
+test('moderate pain is yellow; breast engorgement / low milk are orange (ttm) with TTM referral', () => {
   assert.strictEqual(lvl({ pain: 5 }), 'yellow');
-  assert.strictEqual(lvl({ milk: 'low' }), 'yellow');
+  for (const o of [{ milk: 'low' }, { milk: 'none' }, { engorgement: true }]) {
+    const r = assess({ ...base, ...o });
+    assert.strictEqual(r.level, 'orange'); assert.strictEqual(r.ttmOnly, true); assert.strictEqual(r.referral, 'ttm');
+  }
+});
+test('referral: red → hospital; medical orange → both; ttm + medical mix is not ttmOnly; green/yellow → none', () => {
+  assert.strictEqual(assess({ ...base, bleeding: 'heavy' }).referral, 'hospital');
+  const f = assess({ ...base, tempC: 38.4 }); assert.strictEqual(f.referral, 'both'); assert.strictEqual(f.ttmOnly, false);
+  const mix = assess({ ...base, tempC: 38.4, milk: 'low' }); assert.strictEqual(mix.ttmOnly, false); assert.strictEqual(mix.referral, 'both');
+  assert.strictEqual(assess(base).referral, null); assert.strictEqual(assess({ ...base, pain: 5 }).referral, null);
 });
 test('highest level wins and reasons sorted', () => {
   const r = assess({ ...base, pain: 5, tempC: 38.5 });
@@ -27,10 +36,17 @@ test('highest level wins and reasons sorted', () => {
 });
 test('missing vitals are reported', () => assert.deepStrictEqual(assess({ days: 5 }).missing.length, 3));
 
-test('TTM: red blocks everything, orange defers to staff', () => {
+test('TTM: red blocks everything, medical orange defers to staff, ttm-only orange still shows TTM options', () => {
   assert.strictEqual(recommend({ ...base, bleeding: 'heavy' }, assess({ ...base, bleeding: 'heavy' })).gate, 'blocked');
   const o = { ...base, tempC: 38.2 };
   assert.strictEqual(recommend(o, assess(o)).gate, 'review');
+  const t = { ...base, milk: 'low', days: 20 };
+  const rec = recommend(t, assess(t)); assert.strictEqual(rec.gate, 'open'); assert.ok(rec.items.some(i => i.id === 'food'));
+});
+test('TTM: rehab starts D7 (vaginal) / D30 (cesarean)', () => {
+  const st = (o) => recommend({ ...base, pain: 3, ...o }, assess({ ...base, pain: 3, ...o })).items.find(i => i.id === 'saltpot').status;
+  assert.strictEqual(st({ days: 6 }), 'defer'); assert.strictEqual(st({ days: 7 }), 'consider');
+  assert.strictEqual(st({ delivery: 'cesarean', days: 29 }), 'defer'); assert.strictEqual(st({ delivery: 'cesarean', days: 30 }), 'consider');
 });
 test('TTM: C-section early days defer heat procedures', () => {
   const a = { ...base, delivery: 'cesarean', days: 10, pain: 3 };

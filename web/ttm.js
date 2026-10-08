@@ -3,9 +3,10 @@
  * - ค่าใน WINDOWS เป็น placeholder เพื่อสาธิต ให้สถานบริการกำหนดตามแนวทาง ทปษ. ฉบับล่าสุด */
 (function (root) {
   const WINDOWS = {
-    // จำนวนวันหลังคลอดขั้นต่ำก่อนพิจารณาหัตถการ (PLACEHOLDER — ต้องให้ผู้เชี่ยวชาญกำหนด)
-    vaginal:  { massage: 3, saltPot: 3, steam: 7 },
-    cesarean: { massage: 14, saltPot: 28, steam: 28 },
+    // วันหลังคลอด (D) ที่เริ่มพิจารณาหัตถการฟื้นฟู — ตามเกณฑ์ของโครงการ: คลอดปกติ D7, ผ่าคลอด D30
+    // (ผู้ให้บริการควรทบทวนร่วมกับแนวทาง ทปษ. ฉบับล่าสุด)
+    vaginal:  { massage: 7, saltPot: 7, steam: 7 },
+    cesarean: { massage: 30, saltPot: 30, steam: 30 },
   };
 
   function recommend(a, risk) {
@@ -18,7 +19,7 @@
 
     if (risk.level === 'red')
       return { gate: 'blocked', message: 'งดแนะนำหัตถการแพทย์แผนไทยทั้งหมด — ส่งต่อประเมินฉุกเฉินก่อน', items: [] };
-    if (risk.level === 'orange')
+    if (risk.level === 'orange' && !risk.ttmOnly)
       return { gate: 'review', message: 'ให้บุคลากรประเมินก่อน ยังไม่พิจารณาหัตถการ', items: [] };
 
     const heatBlockers = [];
@@ -35,7 +36,7 @@
       const blockers = heatBlockers;
       if (!relevant) return;
       if (blockers.length) return items.push({ id, name, status: 'avoid', why: blockers.map(b => 'ข้อห้าม/ข้อควรระวัง: ' + b) });
-      if (!(days >= win[key])) return items.push({ id, name, status: 'defer', why: [`ยังไม่ถึงช่วงที่พิจารณา (${mode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด'} ≥ ${win[key]} วัน หลังคลอด — ค่าตัวอย่าง)`] });
+      if (!(days >= win[key])) return items.push({ id, name, status: 'defer', why: [`ยังไม่ถึงช่วงที่พิจารณา (${mode === 'cesarean' ? 'ผ่าตัดคลอด' : 'คลอดทางช่องคลอด'} เริ่ม D${win[key]})`] });
       items.push({ id, name, status: 'consider', why: ['ไม่พบข้อห้ามจากข้อมูลที่มี — รอแพทย์แผนไทยตรวจประเมินก่อนทำหัตถการ', ...(note ? [note] : [])] });
     };
 
